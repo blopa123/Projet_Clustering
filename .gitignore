@@ -1,0 +1,44 @@
+# Ignorer tout par défaut
+*
+
+# Mais inclure ces dossiers et fichiers
+!.gitignore
+!README.md
+!requirements.txt
+
+# Inclure le dossier sujet_tp et son contenu
+!sujet_tp/
+!sujet_tp/**
+
+# Inclure le dossier Projet et son contenu
+!Projet/
+!Projet/**
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output files (optionnel - à garder ou non selon besoin)
+sujet_tp/src/output/*.xlsx
