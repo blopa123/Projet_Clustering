@@ -42,3 +42,7 @@ Thumbs.db
 
 # Output files (optionnel - à garder ou non selon besoin)
 sujet_tp/src/output/*.xlsx
+
+# Fichiers trop volumineux pour GitHub
+Projet/donnees/*.zip
+*.zip
