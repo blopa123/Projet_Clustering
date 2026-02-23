@@ -1,45 +1,45 @@
-# Ignorer tout par défaut
-*
+# Ignore local data and outputs, keep code tracked
 
-# Mais inclure ces dossiers et fichiers
-!.gitignore
-!README.md
-!requirements.txt
+# Data directories (do not track large datasets)
+Projet/donnees/
+donnees/
 
-# Inclure le dossier sujet_tp et son contenu
-!sujet_tp/
-!sujet_tp/**
+# Output / generated files
+output/
+**/output/
+*.xlsx
 
-# Python
+# Python cache and build artifacts
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-*.egg-info/
+*.pyc
 dist/
 build/
+*.egg-info/
 
-# Virtual Environment
+# Virtual environments
 .venv/
 venv/
 ENV/
 
-# IDE
+# IDE/editor
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
-# OS
+# OS files
 .DS_Store
 Thumbs.db
 
-# Output files (optionnel - à garder ou non selon besoin)
-sujet_tp/src/output/*.xlsx
+# Binary extensions
+*.so
+*.pyd
+*.dll
 
-# Fichiers trop volumineux pour GitHub
-Projet/donnees/*.zip
-*.zip
-#. Ignore data and env\n.donnees\n/donnees/\noutput/\n/venv/\n.venv/\n.venv/**\n__pycache__/\n*.pyc\nsrc/output/\n*.xlsx\n*.pyd\n*.dll\n
+# Keep repository essentials
+!.gitignore
+!README.md
+!requirements.txt
+
