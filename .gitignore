@@ -46,3 +46,4 @@ sujet_tp/src/output/*.xlsx
 # Fichiers trop volumineux pour GitHub
 Projet/donnees/*.zip
 *.zip
+#. Ignore data and env\n.donnees\n/donnees/\noutput/\n/venv/\n.venv/\n.venv/**\n__pycache__/\n*.pyc\nsrc/output/\n*.xlsx\n*.pyd\n*.dll\n

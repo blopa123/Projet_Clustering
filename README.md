@@ -1,100 +1,21 @@
-# Projet de Clustering d'Images SNACK - ET4 Deep Learning
+# Projet de clustering des immages Digit pour ET4 info Polytech Paris Saclay
 
-Projet de clustering d'images utilisant différents descripteurs de features (HOG, Histogrammes) et K-Means.
+### step 1 : téléchargement des données et installation des packages
+    - a. installer les requierements : "pip install -r requierements.txt"
 
-## 📁 Structure du projet
+### step 2 : configuration du chemin vers les donnés
+    - a. dans le dossier src/constant.py, modifier la variable "PATH_DATA" par le chemin vers le dossier contenant les données à clusteriser.
 
-```
-.
-├── Projet/
-│   ├── donnees/        # Données SNACK (20 catégories d'aliments)
-│   └── README.md
-│
-└── sujet_tp/
-    └── src/
-        ├── pipeline.py              # Pipeline principal de clustering
-        ├── dashboard_clustering.py  # Dashboard Streamlit
-        ├── clustering.py            # Implémentation K-Means
-        ├── features.py              # Extraction de features (HOG, Histogrammes)
-        ├── utils.py                 # Fonctions utilitaires
-        └── constant.py              # Constantes et chemins
-```
+### step 3 :  run de la pipeline clustering
+    - a. aller dans le dossier src
+    - c. exécutez la commande : "python pipeline.py"
+    
+### step 4 : lancement du dashboard
+    - a. aller dans le dossier src 
+    - b. exécutez la commande : "streamlit run dashboard_clustering.py"
 
-## 🚀 Installation
-
-1. Cloner le dépôt :
-```bash
-git clone <votre-repo>
-cd "deep learning"
-```
-
-2. Créer un environnement virtuel (recommandé) :
-```bash
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-```
-
-3. Installer les dépendances :
-```bash
-pip install -r requirements.txt
-```
-
-## 📊 Utilisation
-
-### Étape 1 : Télécharger les données
-- Télécharger les données SNACK depuis : https://huggingface.co/datasets/Matthijs/snacks/tree/main
-- Extraire le dossier `test` dans `Projet/donnees/test/`
-
-### Étape 2 : Exécuter le pipeline de clustering
-```bash
-cd sujet_tp/src
-python pipeline.py
-```
-
-Cette étape va :
-- Charger les images SNACK (20 catégories)
-- Extraire les features (HOG et Histogrammes)
-- Appliquer le clustering K-Means
-- Sauvegarder les résultats dans `output/`
-
-### Étape 3 : Lancer le dashboard
-```bash
-cd sujet_tp/src
-streamlit run dashboard_clustering.py
-```
-
-Le dashboard permet de :
-- Visualiser les clusters en 3D
-- Comparer les performances des descripteurs
-- Analyser les métriques de clustering
-
-## 📈 Métriques de clustering
-
-Le projet évalue les clusterings avec :
-- Adjusted Rand Index (ARI)
-- Adjusted Mutual Information (AMI)
-- Homogeneity, Completeness, V-measure
-- Silhouette Score
-- Jaccard Index
-
-## 🗂️ Données
-
-Le dataset SNACK contient 20 catégories d'aliments :
-- apple, banana, cake, candy, carrot
-- cookie, doughnut, grape, hot dog, ice cream
-- juice, muffin, orange, pineapple, popcorn
-- pretzel, salad, strawberry, waffle, watermelon
-
-## 🛠️ Technologies
-
-- **Python 3.11**
-- **Scikit-learn** : Clustering et métriques
-- **OpenCV** : Traitement d'images
-- **Scikit-image** : Extraction de features HOG
-- **Streamlit** : Dashboard interactif
-- **Plotly** : Visualisations 3D
-- **TensorFlow** : (si nécessaire pour d'autres features)
-
-## 👥 Auteurs
-
-Projet réalisé dans le cadre du cours de Deep Learning - ET4 Polytech Paris-Saclay
+### step 5 : Créer un docker
+    - a. installer docker
+    - b. compléter le dockerfile pour lancer votre dashboard depuis le docker
+    - c. pour build une image docker : docker build -t mon-app-python .
+    - d. pour run l'image :  docker run -d -p 8000:8000 mon-app-python 
