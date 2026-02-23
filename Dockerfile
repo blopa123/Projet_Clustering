@@ -19,23 +19,23 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Copier le fichier de dépendances (note: le projet utilise 'requierements.txt')
-COPY requierements.txt ./
+# Copier le fichier de dépendances
+COPY requirements.txt ./
 
 # Installer les dépendances (augmenter le timeout réseau)
-RUN pip install --no-cache-dir --timeout 120 -r requierements.txt
+RUN pip install --no-cache-dir --timeout 120 -r requirements.txt
 
-# Copier le code source et les données (si vous voulez les monter depuis l'hôte, vous pouvez omettre la copie des données)
-COPY src/ ./src/
-COPY donnees/ ./donnees/
-# Copier les résultats de sortie (fichiers Excel) pour que Streamlit puisse les lire
+# Copier l'ensemble du projet dans /app/Projet pour préserver l'arborescence
+COPY Projet/ ./Projet/
+
+# Copier les résultats de sortie (fichiers Excel) pour que Streamlit puisse les lire (optionnel)
 COPY output/ ./output/
 
 # Exposer le port utilisé par Streamlit
 EXPOSE 8000
 
-# Optionnel: définir une variable d'environnement pointant vers les données
-ENV PATH_DATA=/app/donnees
+# Définir une variable d'environnement pointant vers les données (conforme à `constant.py`)
+ENV PATH_DATA=/app/Projet/donnees/test
 
-# Lancer le dashboard Streamlit (écoute sur 0.0.0.0 pour être accessible depuis l'extérieur)
-CMD ["streamlit", "run", "src/dashboard_clustering.py", "--server.port", "8000", "--server.address", "0.0.0.0"]
+# Lancer le dashboard Streamlit depuis le chemin Projet/src
+CMD ["streamlit", "run", "Projet/src/dashboard_clustering.py", "--server.port", "8000", "--server.address", "0.0.0.0"]

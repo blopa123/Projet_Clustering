@@ -1,2 +1,0 @@
-# 1. Utiliser une image Python légère
-FROM python:3.11-slim
