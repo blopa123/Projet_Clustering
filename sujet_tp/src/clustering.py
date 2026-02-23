@@ -71,14 +71,7 @@ class KMeans:
             if np.allclose(self.cluster_centers_,old_cluster_center) :
                 break
         self.labels_ = self.nearest_cluster(X)
-            
-
-
-
-
-
-
-        
+                   
 
     def predict(self, X):
         """

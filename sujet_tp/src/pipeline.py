@@ -8,6 +8,7 @@ from features import *
 from clustering import *
 from utils import *
 from constant import PATH_OUTPUT, MODEL_CLUSTERING, PATH_DATA
+from sklearn.cluster import KMeans as SKLearnKMeans
 
 
 def load_snack_images(data_path, img_size=(64, 64)):
@@ -65,8 +66,8 @@ def pipeline():
 
     print("\n\n ##### Clustering ######")
     number_cluster = len(label_names)  # Nombre de catégories
-    kmeans_hog = KMeans(n_clusters=number_cluster)
-    kmeans_hist = KMeans(n_clusters=number_cluster)
+    kmeans_hog = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
+    kmeans_hist = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
 
     print("- calcul kmeans avec features HOG ...")
     kmeans_hog.fit(np.array(descriptors_hog))
