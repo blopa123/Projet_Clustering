@@ -25,17 +25,23 @@ COPY requirements.txt ./
 # Installer les dépendances (augmenter le timeout réseau)
 RUN pip install --no-cache-dir --timeout 120 -r requirements.txt
 
-# Copier l'ensemble du projet dans /app/Projet pour préserver l'arborescence
+# Copier le code source
 COPY Projet/ ./Projet/
+COPY pipeline.py ./pipeline.py
+COPY dashboard.py ./dashboard.py
 
-# Copier les résultats de sortie (fichiers Excel) pour que Streamlit puisse les lire (optionnel)
+# Copier les résultats de sortie (fichiers Excel/CSV) pour que le dashboard puisse les lire (optionnel)
 COPY output/ ./output/
+
+# Aligner les donnees sur la convention demandee: /app/data/test
+COPY Projet/donnees/test/ ./data/test/
 
 # Exposer le port utilisé par Streamlit
 EXPOSE 8000
 
-# Définir une variable d'environnement pointant vers les données (conforme à `constant.py`)
-ENV PATH_DATA=/app/Projet/donnees/test
+# Variables d'environnement pour les chemins par défaut
+ENV PATH_DATA=/app/data/test
+ENV PATH_ANALYSIS=/app/output
 
-# Lancer le dashboard Streamlit depuis le chemin Projet/src
-CMD ["streamlit", "run", "Projet/src/dashboard_clustering.py", "--server.port", "8000", "--server.address", "0.0.0.0"]
+# Lancer le dashboard via le script racine
+CMD ["python", "dashboard.py", "--path_data", "/app/output", "--port", "8000"]
