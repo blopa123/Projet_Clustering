@@ -9,10 +9,20 @@ import cv2
 import os
 
 try:
-    from .features import compute_hog_descriptors, compute_gray_histograms, compute_resnet50_descriptors
+    from .features import (
+        compute_color_histograms_hsv,
+        compute_gray_histograms,
+        compute_hog_descriptors,
+        compute_resnet50_descriptors,
+    )
     from .constant import PATH_DATA, PATH_OUTPUT, REPO_ROOT, LEGACY_PATH_DATA
 except ImportError:
-    from features import compute_hog_descriptors, compute_gray_histograms, compute_resnet50_descriptors
+    from features import (
+        compute_color_histograms_hsv,
+        compute_gray_histograms,
+        compute_hog_descriptors,
+        compute_resnet50_descriptors,
+    )
     from constant import PATH_DATA, PATH_OUTPUT, REPO_ROOT, LEGACY_PATH_DATA
 
 
@@ -68,7 +78,8 @@ def plot_metric(df_metric):
 
 @st.cache_data
 def load_snack_images_with_paths(data_path, img_size=(64, 64)):
-    images = []
+    images_gray = []
+    images_bgr = []
     labels = []
     label_names = []
     image_paths = []
@@ -89,20 +100,24 @@ def load_snack_images_with_paths(data_path, img_size=(64, 64)):
             if img is not None:
                 img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 img_resized = cv2.resize(img_gray, img_size)
-                images.append(img_resized)
+                img_bgr_resized = cv2.resize(img, img_size)
+                images_gray.append(img_resized)
+                images_bgr.append(img_bgr_resized)
                 labels.append(label_idx)
                 image_paths.append(img_path)
 
-    return np.array(images), np.array(labels), label_names, image_paths
+    return np.array(images_gray), np.array(images_bgr), np.array(labels), label_names, image_paths
 
 
 @st.cache_data
-def compute_descriptor_matrix(images, descriptor):
+def compute_descriptor_matrix(images_gray, images_bgr, descriptor):
     if descriptor == "HOG":
-        return compute_hog_descriptors(images)
+        return compute_hog_descriptors(images_gray)
+    if descriptor == "HSV":
+        return compute_color_histograms_hsv(images_bgr)
     if descriptor == "RESNET50":
-        return compute_resnet50_descriptors(images)
-    return compute_gray_histograms(images)
+        return compute_resnet50_descriptors(images_gray)
+    return compute_gray_histograms(images_gray)
 
 
 @st.cache_data
@@ -150,9 +165,11 @@ data_dir = resolve_data_path()
 df_metric = read_analysis_file(analysis_dir, "save_metric")
 df_hist_kmeans = read_analysis_file(analysis_dir, "save_clustering_hist_kmeans")
 df_hog_kmeans = read_analysis_file(analysis_dir, "save_clustering_hog_kmeans")
+df_hsv_kmeans = read_analysis_file(analysis_dir, "save_clustering_hsv_kmeans")
 df_resnet_kmeans = read_analysis_file(analysis_dir, "save_clustering_resnet_kmeans")
 df_hist_meanshift = read_analysis_file(analysis_dir, "save_clustering_hist_meanshift")
 df_hog_meanshift = read_analysis_file(analysis_dir, "save_clustering_hog_meanshift")
+df_hsv_meanshift = read_analysis_file(analysis_dir, "save_clustering_hsv_meanshift")
 df_resnet_meanshift = read_analysis_file(analysis_dir, "save_clustering_resnet_meanshift")
 
 if df_metric is None:
@@ -178,7 +195,7 @@ with tab1:
     # Sélection du modèle
     model = st.sidebar.selectbox('Sélectionner le modèle de clustering', ["kmeans", "meanshift"])
     # Sélection des descripteurs
-    descriptor =  st.sidebar.selectbox('Sélectionner un descripteur', ["HISTOGRAM","HOG", "RESNET50"])
+    descriptor =  st.sidebar.selectbox('Sélectionner un descripteur', ["HISTOGRAM","HOG", "HSV", "RESNET50"])
     # Récupérer le dataframe correspondant au modèle et au descripteur
     df = None
     if model == "kmeans":
@@ -186,6 +203,8 @@ with tab1:
             df = df_hist_kmeans
         elif descriptor == "HOG":
             df = df_hog_kmeans
+        elif descriptor == "HSV":
+            df = df_hsv_kmeans
         else:
             df = df_resnet_kmeans
     else:
@@ -193,6 +212,8 @@ with tab1:
             df = df_hist_meanshift
         elif descriptor == "HOG":
             df = df_hog_meanshift
+        elif descriptor == "HSV":
+            df = df_hsv_meanshift
         else:
             df = df_resnet_meanshift
 
@@ -213,19 +234,30 @@ with tab1:
     fig = colorize_cluster(df, selected_cluster)
     st.plotly_chart(fig)
 
-    st.write("#### Image exemple du cluster")
-    images, labels_true, label_names, image_paths = load_snack_images_with_paths(data_dir)
+    st.write("#### Extrait de 10 images du cluster")
+    images_gray, images_bgr, labels_true, label_names, image_paths = load_snack_images_with_paths(data_dir)
 
     if len(cluster_indices) > 0:
-        example_idx = int(cluster_indices[0])
-        if example_idx < len(images):
-            st.image(images[example_idx], caption=f"Exemple index {example_idx} | cluster {selected_cluster}", clamp=True)
-            if "label" in df.columns:
-                true_label_idx = int(df.iloc[example_idx]["label"])
-                if 0 <= true_label_idx < len(label_names):
-                    st.caption(f"Label réel: {label_names[true_label_idx]}")
+        sample_indices = [int(i) for i in cluster_indices[:10]]
+        valid_indices = [i for i in sample_indices if 0 <= i < len(images_gray)]
+
+        if not valid_indices:
+            st.warning("Impossible de retrouver les images correspondantes (index hors limites).")
         else:
-            st.warning("Impossible de retrouver l'image correspondante (index hors limites).")
+            cols = st.columns(5)
+            for pos, image_idx in enumerate(valid_indices):
+                col = cols[pos % 5]
+                with col:
+                    st.image(images_gray[image_idx], clamp=True)
+                    caption = f"Index {image_idx}"
+                    if "label" in df.columns:
+                        true_label_idx = int(df.iloc[image_idx]["label"])
+                        if 0 <= true_label_idx < len(label_names):
+                            caption += f" | {label_names[true_label_idx]}"
+                    st.caption(caption)
+
+            if len(cluster_indices) < 10:
+                st.info(f"Ce cluster contient seulement {len(cluster_indices)} image(s).")
     else:
         st.info("Aucune image trouvée pour ce cluster.")
 
@@ -245,14 +277,18 @@ with tab1:
         c3.metric("Silhouette", "N/A" if pd.isna(m['silhouette']) else f"{m['silhouette']:.4f}")
         c4.metric("Jaccard", f"{m['jaccard']:.4f}")
 
-        c5, c6, c7 = st.columns(3)
+        c5, c6, c7, c8 = st.columns(4)
         c5.metric("Homogeneity", f"{m['homogeneity']:.4f}")
         c6.metric("Completeness", f"{m['completeness']:.4f}")
         c7.metric("V-measure", f"{m['v_measure']:.4f}")
+        c8.metric(
+            "Davies-Bouldin",
+            "N/A" if pd.isna(m.get('davies_bouldin', np.nan)) else f"{m['davies_bouldin']:.4f}"
+        )
 
     st.write("#### Suivi du silhouette score (k = 5, 10, 15, 20, 25)")
     k_values = [5, 10, 15, 20, 25]
-    descriptors = compute_descriptor_matrix(images, descriptor)
+    descriptors = compute_descriptor_matrix(images_gray, images_bgr, descriptor)
     df_sil = compute_silhouette_tracking(descriptors, model, k_values)
 
     fig_sil = px.line(

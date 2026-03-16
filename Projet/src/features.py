@@ -28,47 +28,80 @@ def compute_hog_descriptors(images):
     """
     descriptors = []
     for image in images:
-        fd = hog(image, orientations=9, 
-                 pixels_per_cell=(4, 4),
-                 cells_per_block=(1, 1), 
+        fd = hog(image, orientations=12, 
+                 pixels_per_cell=(8, 8),
+                 cells_per_block=(2, 2), 
                  visualize=False)
         descriptors.append(fd)
     return np.array(descriptors)
 
 
-def compute_resnet50_descriptors(images, batch_size=32):
+def compute_resnet50_descriptors(images, batch_size=32, layer_name="avg_pool"):
     """
-    Extrait des descripteurs profonds avec ResNet50 (sans couche de classification).
-    Input : images (array) : images en niveaux de gris ou RGB
-            batch_size (int) : taille de batch pour l'inférence
-    Output : descriptors (array) : vecteurs de features convolutionnelles
+    layer_name options :
+      - "avg_pool"      : sortie standard 2048 dims (pooling avg)
+      - "conv5_block3_out" : features conv avant pooling (7×7×2048)
+      - "conv4_block6_out" : features plus génériques (14×14×1024)
     """
-    try:
-        from tensorflow.keras.applications import ResNet50
-        from tensorflow.keras.applications.resnet50 import preprocess_input
-    except Exception as exc:
-        raise ImportError(
-            "TensorFlow/Keras est requis pour le descripteur ResNet50."
-        ) from exc
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+    from tensorflow.keras.applications import ResNet50
+    from tensorflow.keras.applications.resnet50 import preprocess_input
+    from tensorflow.keras.layers import Concatenate, GlobalAveragePooling2D, GlobalMaxPooling2D
+    from tensorflow.keras.models import Model
 
-    model = ResNet50(weights="imagenet", include_top=False, pooling="avg")
+    base_model = ResNet50(weights="imagenet", include_top=False, pooling=None)
 
-    processed_images = []
+    # Avec include_top=False et pooling=None, avg_pool n'existe pas comme couche nommée.
+    if layer_name == "avg_pool":
+        output_layer = GlobalAveragePooling2D()(base_model.output)
+        model = Model(inputs=base_model.input, outputs=output_layer)
+    else:
+        output_layer = base_model.get_layer(layer_name).output
+
+        # Si la sortie est 3D (H×W×C), appliquer un pooling global enrichi.
+        if len(output_layer.shape) == 4:
+            out_avg = GlobalAveragePooling2D()(output_layer)
+            out_max = GlobalMaxPooling2D()(output_layer)
+            out = Concatenate()([out_avg, out_max])
+            model = Model(inputs=base_model.input, outputs=out)
+        else:
+            model = Model(inputs=base_model.input, outputs=output_layer)
+
+    # Prétraitement et inférence (identique à votre code actuel)
+    processed = []
     for image in images:
         if image.ndim == 2:
-            image_rgb = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_GRAY2RGB)
-        elif image.ndim == 3 and image.shape[2] == 1:
-            image_rgb = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_GRAY2RGB)
+            image = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_GRAY2RGB)
         else:
-            # cv2 charge en BGR; conversion vers RGB pour ResNet50.
-            image_rgb = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2RGB)
+            image = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2RGB)
+        image = cv2.resize(image, (224, 224)).astype(np.float32)
+        processed.append(image)
 
-        image_resized = cv2.resize(image_rgb, (224, 224))
-        processed_images.append(image_resized.astype(np.float32))
-
-    processed_images = np.array(processed_images, dtype=np.float32)
-    processed_images = preprocess_input(processed_images)
-
-    descriptors = model.predict(processed_images, batch_size=batch_size, verbose=0)
-    return np.array(descriptors)
+    processed = preprocess_input(np.array(processed, dtype=np.float32))
+    return model.predict(processed, batch_size=batch_size, verbose=0)
     
+
+def compute_color_histograms_hsv(images_bgr):
+    """
+    Calcule des histogrammes HSV pondérés pour des images BGR.
+    H : 36 bins  (couleur pure — le plus discriminant)
+    S : 32 bins  (saturation)
+    V : 16 bins  (luminosité — le moins discriminant)
+    """
+    descriptors = []
+    for image in images_bgr:
+        image_uint8 = image.astype(np.uint8)
+        hsv = cv2.cvtColor(image_uint8, cv2.COLOR_BGR2HSV)
+
+        # Histogrammes par canal avec bins adaptés à l'importance
+        h_hist = cv2.calcHist([hsv], [0], None, [36], [0, 180]).flatten()
+        s_hist = cv2.calcHist([hsv], [1], None, [32], [0, 256]).flatten()
+        v_hist = cv2.calcHist([hsv], [2], None, [16], [0, 256]).flatten()
+
+        descriptor = np.concatenate([h_hist, s_hist, v_hist])
+
+        # Normalisation L1 — invariante à la taille de l'image
+        descriptor = descriptor / (descriptor.sum() + 1e-7)
+
+        descriptors.append(descriptor)
+    return np.array(descriptors)

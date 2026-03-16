@@ -6,13 +6,23 @@ import pandas as pd
 import cv2
 
 try:
-    from .features import compute_hog_descriptors, compute_gray_histograms, compute_resnet50_descriptors
+    from .features import (
+        compute_color_histograms_hsv,
+        compute_gray_histograms,
+        compute_hog_descriptors,
+        compute_resnet50_descriptors,
+    )
     from .clustering import show_metric
     from .utils import conversion_3d, create_df_to_export
     from .constant import PATH_OUTPUT, PATH_DATA, REPO_ROOT, LEGACY_PATH_DATA
 except ImportError:
     # Support direct execution from Projet/src.
-    from features import compute_hog_descriptors, compute_gray_histograms, compute_resnet50_descriptors
+    from features import (
+        compute_color_histograms_hsv,
+        compute_gray_histograms,
+        compute_hog_descriptors,
+        compute_resnet50_descriptors,
+    )
     from clustering import show_metric
     from utils import conversion_3d, create_df_to_export
     from constant import PATH_OUTPUT, PATH_DATA, REPO_ROOT, LEGACY_PATH_DATA
@@ -28,11 +38,13 @@ def load_snack_images(data_path, img_size=(64, 64)):
     Charge les images depuis le dossier de données SNACK
     Input : data_path (str) : chemin vers le dossier contenant les images
             img_size (tuple) : taille de redimensionnement des images
-    Output : images (list) : liste des images
+    Output : images_gray (list) : liste des images en niveaux de gris
+             images_bgr (list) : liste des images couleur au format BGR
              labels (list) : liste des labels (noms des catégories)
              label_names (list) : noms des catégories
     """
-    images = []
+    images_gray = []
+    images_bgr = []
     labels = []
     label_names = []
     
@@ -54,11 +66,13 @@ def load_snack_images(data_path, img_size=(64, 64)):
                 img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 # Redimensionner
                 img_resized = cv2.resize(img_gray, img_size)
+                img_bgr_resized = cv2.resize(img, img_size)
                 
-                images.append(img_resized)
+                images_gray.append(img_resized)
+                images_bgr.append(img_bgr_resized)
                 labels.append(label_idx)
     
-    return np.array(images), np.array(labels), label_names
+    return np.array(images_gray), np.array(images_bgr), np.array(labels), label_names
 
 
 def resolve_data_path(path_data=None):
@@ -102,17 +116,19 @@ def pipeline(path_data=None, path_output=None):
     # Chargement des données SNACK
     print("\n\n ##### Chargement des données SNACK ######")
     print(f"Chemin données: {data_path}")
-    images, labels_true, label_names = load_snack_images(data_path)
-    print(f"Nombre d'images chargées : {len(images)}")
+    images_gray, images_bgr, labels_true, label_names = load_snack_images(data_path)
+    print(f"Nombre d'images chargées : {len(images_gray)}")
     print(f"Catégories : {label_names}")
    
     print("\n\n ##### Extraction de Features ######")
     print("- calcul features hog...")
-    descriptors_hog = compute_hog_descriptors(images)
+    descriptors_hog = compute_hog_descriptors(images_gray)
     print("- calcul features Histogram...")
-    descriptors_hist = compute_gray_histograms(images)
+    descriptors_hist = compute_gray_histograms(images_gray)
+    print("- calcul features HSV...")
+    descriptors_hsv = compute_color_histograms_hsv(images_bgr)
     print("- calcul features ResNet50...")
-    descriptors_resnet = compute_resnet50_descriptors(images)
+    descriptors_resnet = compute_resnet50_descriptors(images_gray)
 
     # Réduction de dimension pour MeanShift (PCA ~10 dims)
     def _safe_n_components(X, target=10):
@@ -122,22 +138,33 @@ def pipeline(path_data=None, path_output=None):
     # Normalisation uniquement pour MeanShift (pas pour KMeans)
     scaler_ms_hog = StandardScaler()
     scaler_ms_hist = StandardScaler()
+    scaler_ms_hsv = StandardScaler()
     scaler_ms_resnet = StandardScaler()
     descriptors_hog_ms = scaler_ms_hog.fit_transform(np.array(descriptors_hog))
     descriptors_hist_ms = scaler_ms_hist.fit_transform(np.array(descriptors_hist))
+    descriptors_hsv_ms = scaler_ms_hsv.fit_transform(np.array(descriptors_hsv))
     descriptors_resnet_ms = scaler_ms_resnet.fit_transform(np.array(descriptors_resnet))
 
     n_comp_hog = _safe_n_components(descriptors_hog_ms, target=10)
     n_comp_hist = _safe_n_components(descriptors_hist_ms, target=10)
+    n_comp_hsv = _safe_n_components(descriptors_hsv_ms, target=10)
     n_comp_resnet = _safe_n_components(descriptors_resnet_ms, target=10)
     pca_hog = PCA(n_components=n_comp_hog)
     pca_hist = PCA(n_components=n_comp_hist)
+    pca_hsv = PCA(n_components=n_comp_hsv)
     pca_resnet = PCA(n_components=n_comp_resnet)
     descriptors_hog_pca = pca_hog.fit_transform(descriptors_hog_ms)
     descriptors_hist_pca = pca_hist.fit_transform(descriptors_hist_ms)
+    descriptors_hsv_pca = pca_hsv.fit_transform(descriptors_hsv_ms)
     descriptors_resnet_pca = pca_resnet.fit_transform(descriptors_resnet_ms)
 
-    print(f"Applied PCA: HOG -> {n_comp_hog} dims, HIST -> {n_comp_hist} dims, RESNET50 -> {n_comp_resnet} dims")
+    print(
+        "Applied PCA: "
+        f"HOG -> {n_comp_hog} dims, "
+        f"HIST -> {n_comp_hist} dims, "
+        f"HSV -> {n_comp_hsv} dims, "
+        f"RESNET50 -> {n_comp_resnet} dims"
+    )
 
     number_cluster = len(label_names)  # Nombre de catégories
 
@@ -146,6 +173,7 @@ def pipeline(path_data=None, path_output=None):
     quantiles = list(np.linspace(0.01, 0.5, 20))
     results_hog = []
     results_hist = []
+    results_hsv = []
     results_resnet = []
     target = number_cluster
     for q in quantiles:
@@ -173,6 +201,18 @@ def pipeline(path_data=None, path_output=None):
             n_hist = None
         results_hist.append((q, bw2, n_hist))
 
+        # HSV
+        try:
+            bw_hsv = estimate_bandwidth(descriptors_hsv_pca, quantile=q, n_samples=min(500, len(descriptors_hsv_pca)))
+            if bw_hsv is None or bw_hsv <= 0:
+                n_hsv = None
+            else:
+                n_hsv = len(np.unique(SKLearnMeanShift(bandwidth=bw_hsv, bin_seeding=True).fit(descriptors_hsv_pca).labels_))
+        except Exception:
+            bw_hsv = None
+            n_hsv = None
+        results_hsv.append((q, bw_hsv, n_hsv))
+
         # RESNET50
         try:
             bw3 = estimate_bandwidth(descriptors_resnet_pca, quantile=q, n_samples=min(500, len(descriptors_resnet_pca)))
@@ -185,7 +225,13 @@ def pipeline(path_data=None, path_output=None):
             n_resnet = None
         results_resnet.append((q, bw3, n_resnet))
 
-        print(f"quantile={q:.3f} -> HOG: bw={bw}, n_clusters={n_hog} | HIST: bw={bw2}, n_clusters={n_hist} | RESNET50: bw={bw3}, n_clusters={n_resnet}")
+        print(
+            f"quantile={q:.3f} -> "
+            f"HOG: bw={bw}, n_clusters={n_hog} | "
+            f"HIST: bw={bw2}, n_clusters={n_hist} | "
+            f"HSV: bw={bw_hsv}, n_clusters={n_hsv} | "
+            f"RESNET50: bw={bw3}, n_clusters={n_resnet}"
+        )
 
     # Choisir le bandwidth produisant un nombre de clusters le plus proche de la cible
     def _choose_best(results, target):
@@ -205,6 +251,7 @@ def pipeline(path_data=None, path_output=None):
 
     best_hog = _choose_best(results_hog, target)
     best_hist = _choose_best(results_hist, target)
+    best_hsv = _choose_best(results_hsv, target)
     best_resnet = _choose_best(results_resnet, target)
 
     if best_hog[1] is None:
@@ -221,6 +268,13 @@ def pipeline(path_data=None, path_output=None):
         best_bw_hist = best_hist[1]
         print(f"Choix HIST -> quantile={best_hist[0]:.3f}, bandwidth={best_bw_hist}, clusters={best_hist[2]}")
 
+    if best_hsv[1] is None:
+        print("Aucun bandwidth utile trouvé pour HSV via estimate_bandwidth; utilisation du bandwidth par défaut.")
+        best_bw_hsv = None
+    else:
+        best_bw_hsv = best_hsv[1]
+        print(f"Choix HSV -> quantile={best_hsv[0]:.3f}, bandwidth={best_bw_hsv}, clusters={best_hsv[2]}")
+
     if best_resnet[1] is None:
         print("Aucun bandwidth utile trouvé pour RESNET50 via estimate_bandwidth; utilisation du bandwidth par défaut.")
         best_bw_resnet = None
@@ -231,12 +285,15 @@ def pipeline(path_data=None, path_output=None):
     print("\n\n ##### Clustering ######")
     kmeans_hog = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
     kmeans_hist = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
+    kmeans_hsv = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
     kmeans_resnet = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
 
     print("- calcul kmeans avec features HOG ...")
     kmeans_hog.fit(np.array(descriptors_hog))
     print("- calcul kmeans avec features Histogram...")
     kmeans_hist.fit(np.array(descriptors_hist))
+    print("- calcul kmeans avec features HSV...")
+    kmeans_hsv.fit(np.array(descriptors_hsv))
     print("- calcul kmeans avec features ResNet50...")
     kmeans_resnet.fit(np.array(descriptors_resnet))
 
@@ -251,6 +308,11 @@ def pipeline(path_data=None, path_output=None):
     else:
         meanshift_hist = SKLearnMeanShift()
 
+    if best_bw_hsv is not None:
+        meanshift_hsv = SKLearnMeanShift(bandwidth=best_bw_hsv, bin_seeding=True)
+    else:
+        meanshift_hsv = SKLearnMeanShift()
+
     if best_bw_resnet is not None:
         meanshift_resnet = SKLearnMeanShift(bandwidth=best_bw_resnet, bin_seeding=True)
     else:
@@ -260,6 +322,8 @@ def pipeline(path_data=None, path_output=None):
     meanshift_hog.fit(descriptors_hog_pca)
     print("- calcul meanshift avec features Histogram (PCA réduit)...")
     meanshift_hist.fit(descriptors_hist_pca)
+    print("- calcul meanshift avec features HSV (PCA réduit)...")
+    meanshift_hsv.fit(descriptors_hsv_pca)
     print("- calcul meanshift avec features ResNet50 (PCA réduit)...")
     meanshift_resnet.fit(descriptors_resnet_pca)
 
@@ -267,37 +331,52 @@ def pipeline(path_data=None, path_output=None):
     print("\n\n ##### Résultat ######")
     metric_hist = show_metric(labels_true, kmeans_hist.labels_, descriptors_hist, bool_show=True, name_descriptor="HISTOGRAM", bool_return=True, name_model="kmeans")
     metric_hog = show_metric(labels_true, kmeans_hog.labels_, descriptors_hog,bool_show=True, name_descriptor="HOG", bool_return=True, name_model="kmeans")
+    metric_hsv = show_metric(labels_true, kmeans_hsv.labels_, descriptors_hsv, bool_show=True, name_descriptor="HSV", bool_return=True, name_model="kmeans")
     metric_resnet = show_metric(labels_true, kmeans_resnet.labels_, descriptors_resnet, bool_show=True, name_descriptor="RESNET50", bool_return=True, name_model="kmeans")
 
     metric_hist_ms = show_metric(labels_true, meanshift_hist.labels_, descriptors_hist, bool_show=True, name_descriptor="HISTOGRAM", bool_return=True, name_model="meanshift")
     metric_hog_ms = show_metric(labels_true, meanshift_hog.labels_, descriptors_hog, bool_show=True, name_descriptor="HOG", bool_return=True, name_model="meanshift")
+    metric_hsv_ms = show_metric(labels_true, meanshift_hsv.labels_, descriptors_hsv, bool_show=True, name_descriptor="HSV", bool_return=True, name_model="meanshift")
     metric_resnet_ms = show_metric(labels_true, meanshift_resnet.labels_, descriptors_resnet, bool_show=True, name_descriptor="RESNET50", bool_return=True, name_model="meanshift")
 
 
     print("- export des données vers le dashboard")
     # conversion des données vers le format du dashboard
-    list_dict = [metric_hist, metric_hog, metric_resnet, metric_hist_ms, metric_hog_ms, metric_resnet_ms]
+    list_dict = [
+        metric_hist,
+        metric_hog,
+        metric_hsv,
+        metric_resnet,
+        metric_hist_ms,
+        metric_hog_ms,
+        metric_hsv_ms,
+        metric_resnet_ms,
+    ]
     df_metric = pd.DataFrame(list_dict)
     
     # Normalisation des données
     scaler = StandardScaler()
     descriptors_hist_norm = scaler.fit_transform(descriptors_hist)
     descriptors_hog_norm = scaler.fit_transform(descriptors_hog)
+    descriptors_hsv_norm = scaler.fit_transform(descriptors_hsv)
     descriptors_resnet_norm = scaler.fit_transform(descriptors_resnet)
 
     #conversion vers un format 3D pour la visualisation
     x_3d_hist = conversion_3d(descriptors_hist_norm)
     x_3d_hog = conversion_3d(descriptors_hog_norm)
+    x_3d_hsv = conversion_3d(descriptors_hsv_norm)
     x_3d_resnet = conversion_3d(descriptors_resnet_norm)
 
     # création des dataframe pour la sauvegarde des données pour la visualisation
     df_hist = create_df_to_export(x_3d_hist, labels_true, kmeans_hist.labels_)
     df_hog = create_df_to_export(x_3d_hog, labels_true, kmeans_hog.labels_)
+    df_hsv = create_df_to_export(x_3d_hsv, labels_true, kmeans_hsv.labels_)
     df_resnet = create_df_to_export(x_3d_resnet, labels_true, kmeans_resnet.labels_)
 
     # Dataframes for MeanShift
     df_hist_meanshift = create_df_to_export(x_3d_hist, labels_true, meanshift_hist.labels_)
     df_hog_meanshift = create_df_to_export(x_3d_hog, labels_true, meanshift_hog.labels_)
+    df_hsv_meanshift = create_df_to_export(x_3d_hsv, labels_true, meanshift_hsv.labels_)
     df_resnet_meanshift = create_df_to_export(x_3d_resnet, labels_true, meanshift_resnet.labels_)
 
     # Vérifie si le dossier existe déjà
@@ -308,9 +387,11 @@ def pipeline(path_data=None, path_output=None):
     # sauvegarde des données
     save_dataframe_multi_format(df_hist, output_path, "save_clustering_hist_kmeans")
     save_dataframe_multi_format(df_hog, output_path, "save_clustering_hog_kmeans")
+    save_dataframe_multi_format(df_hsv, output_path, "save_clustering_hsv_kmeans")
     save_dataframe_multi_format(df_resnet, output_path, "save_clustering_resnet_kmeans")
     save_dataframe_multi_format(df_hist_meanshift, output_path, "save_clustering_hist_meanshift")
     save_dataframe_multi_format(df_hog_meanshift, output_path, "save_clustering_hog_meanshift")
+    save_dataframe_multi_format(df_hsv_meanshift, output_path, "save_clustering_hsv_meanshift")
     save_dataframe_multi_format(df_resnet_meanshift, output_path, "save_clustering_resnet_meanshift")
     save_dataframe_multi_format(df_metric, output_path, "save_metric")
     print(f"Résultats exportés dans: {output_path}")

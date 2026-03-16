@@ -3,6 +3,7 @@ from sklearn.metrics import (
     homogeneity_completeness_v_measure,
     jaccard_score,
     silhouette_score,
+    davies_bouldin_score,
     adjusted_rand_score,
 )
 import pandas as pd
@@ -27,11 +28,16 @@ def show_metric(labels_true, labels_pred, descriptors=None, bool_show=True, name
     jaccard = jaccard_score(labels_true, labels_pred, average='macro')
     ami = adjusted_mutual_info_score(labels_true, labels_pred)
     silhouette = None
+    davies_bouldin = None
     try:
-        if descriptors is not None:
+        n_labels = len(set(labels_pred))
+        n_samples = len(labels_pred)
+        if descriptors is not None and 1 < n_labels < n_samples:
             silhouette = float(silhouette_score(descriptors, labels_pred))
+            davies_bouldin = float(davies_bouldin_score(descriptors, labels_pred))
     except Exception:
         silhouette = None
+        davies_bouldin = None
     ari = adjusted_rand_score(labels_true, labels_pred)
     # Affichons les résultats
     if bool_show :
@@ -42,11 +48,13 @@ def show_metric(labels_true, labels_pred, descriptors=None, bool_show=True, name
         print(f"Completeness: {completeness}")
         print(f"V-measure: {v_measure}")
         print(f"Silhouette Score: {silhouette}")
+        print(f"Davies-Bouldin Index: {davies_bouldin}")
         print(f"Adjusted Mutual Information: {ami}")
     if bool_return:
         return {"ami":ami,
                 "ari":ari, 
                 "silhouette":silhouette,
+            "davies_bouldin":davies_bouldin,
                 "homogeneity":homogeneity,
                 "completeness":completeness,
                 "v_measure":v_measure, 
