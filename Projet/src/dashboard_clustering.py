@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.cluster import MeanShift, estimate_bandwidth
-from sklearn.metrics import silhouette_score
+from sklearn.metrics import davies_bouldin_score, silhouette_score
 import plotly.express as px
 import cv2
 import os
@@ -184,6 +184,9 @@ if 'Unnamed: 0' in df_metric.columns:
 if "name_model" in df_metric.columns:
     df_metric["name_model"] = df_metric["name_model"].astype(str).str.lower()
 
+if "davies_bouldin" not in df_metric.columns:
+    st.info("La colonne davies_bouldin est absente des métriques exportées: recalcul à la volée dans le dashboard.")
+
 # Création de deux onglets
 tab1, tab2 = st.tabs(["Analyse par descripteur", "Analyse global" ])
 
@@ -248,7 +251,9 @@ with tab1:
             for pos, image_idx in enumerate(valid_indices):
                 col = cols[pos % 5]
                 with col:
-                    st.image(images_gray[image_idx], clamp=True)
+                    # OpenCV charge les images en BGR; Streamlit attend RGB.
+                    img_rgb = cv2.cvtColor(images_bgr[image_idx], cv2.COLOR_BGR2RGB)
+                    st.image(img_rgb, clamp=True)
                     caption = f"Index {image_idx}"
                     if "label" in df.columns:
                         true_label_idx = int(df.iloc[image_idx]["label"])
@@ -262,6 +267,7 @@ with tab1:
         st.info("Aucune image trouvée pour ce cluster.")
 
     st.write("#### Métriques du clustering sélectionné")
+    descriptors = compute_descriptor_matrix(images_gray, images_bgr, descriptor)
     metric_row = df_metric[
         (df_metric["descriptor"] == descriptor)
         & (df_metric["name_model"] == model)
@@ -271,6 +277,17 @@ with tab1:
         st.warning("Aucune métrique trouvée pour ce modèle/descripteur.")
     else:
         m = metric_row.iloc[0]
+        db_metric = m.get('davies_bouldin', np.nan)
+        if pd.isna(db_metric):
+            try:
+                pred_labels = df["cluster"].to_numpy()
+                n_labels = len(np.unique(pred_labels))
+                n_samples = len(pred_labels)
+                if 1 < n_labels < n_samples:
+                    db_metric = float(davies_bouldin_score(descriptors, pred_labels))
+            except Exception:
+                db_metric = np.nan
+
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("AMI", f"{m['ami']:.4f}")
         c2.metric("ARI", f"{m['ari']:.4f}")
@@ -281,14 +298,10 @@ with tab1:
         c5.metric("Homogeneity", f"{m['homogeneity']:.4f}")
         c6.metric("Completeness", f"{m['completeness']:.4f}")
         c7.metric("V-measure", f"{m['v_measure']:.4f}")
-        c8.metric(
-            "Davies-Bouldin",
-            "N/A" if pd.isna(m.get('davies_bouldin', np.nan)) else f"{m['davies_bouldin']:.4f}"
-        )
+        c8.metric("Davies-Bouldin", "N/A" if pd.isna(db_metric) else f"{db_metric:.4f}")
 
     st.write("#### Suivi du silhouette score (k = 5, 10, 15, 20, 25)")
     k_values = [5, 10, 15, 20, 25]
-    descriptors = compute_descriptor_matrix(images_gray, images_bgr, descriptor)
     df_sil = compute_silhouette_tracking(descriptors, model, k_values)
 
     fig_sil = px.line(

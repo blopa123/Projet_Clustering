@@ -130,6 +130,16 @@ def pipeline(path_data=None, path_output=None):
     print("- calcul features ResNet50...")
     descriptors_resnet = compute_resnet50_descriptors(images_gray)
 
+    # Normalisation pour KMeans : met toutes les dimensions sur une echelle comparable.
+    scaler_km_hog = StandardScaler()
+    scaler_km_hist = StandardScaler()
+    scaler_km_hsv = StandardScaler()
+    scaler_km_resnet = StandardScaler()
+    descriptors_hog_km = scaler_km_hog.fit_transform(np.array(descriptors_hog))
+    descriptors_hist_km = scaler_km_hist.fit_transform(np.array(descriptors_hist))
+    descriptors_hsv_km = scaler_km_hsv.fit_transform(np.array(descriptors_hsv))
+    descriptors_resnet_km = scaler_km_resnet.fit_transform(np.array(descriptors_resnet))
+
     # Réduction de dimension pour MeanShift (PCA ~10 dims)
     def _safe_n_components(X, target=10):
         n_samples, n_features = X.shape[0], X.shape[1]
@@ -283,19 +293,19 @@ def pipeline(path_data=None, path_output=None):
         print(f"Choix RESNET50 -> quantile={best_resnet[0]:.3f}, bandwidth={best_bw_resnet}, clusters={best_resnet[2]}")
 
     print("\n\n ##### Clustering ######")
-    kmeans_hog = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
-    kmeans_hist = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
-    kmeans_hsv = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
-    kmeans_resnet = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
+    kmeans_hog = SKLearnKMeans(n_clusters=number_cluster,init="k-means++",n_init=50,max_iter=1000,algorithm="elkan",random_state=0)
+    kmeans_hist = SKLearnKMeans(n_clusters=number_cluster,init="k-means++",n_init=50,max_iter=1000,algorithm="elkan",random_state=0)
+    kmeans_hsv = SKLearnKMeans(n_clusters=number_cluster,init="k-means++",n_init=50,max_iter=1000,algorithm="elkan",random_state=0)
+    kmeans_resnet = SKLearnKMeans(n_clusters=number_cluster,init="k-means++",n_init=50,max_iter=1000,algorithm="elkan",random_state=0)
 
     print("- calcul kmeans avec features HOG ...")
-    kmeans_hog.fit(np.array(descriptors_hog))
+    kmeans_hog.fit(descriptors_hog_km)
     print("- calcul kmeans avec features Histogram...")
-    kmeans_hist.fit(np.array(descriptors_hist))
+    kmeans_hist.fit(descriptors_hist_km)
     print("- calcul kmeans avec features HSV...")
-    kmeans_hsv.fit(np.array(descriptors_hsv))
+    kmeans_hsv.fit(descriptors_hsv_km)
     print("- calcul kmeans avec features ResNet50...")
-    kmeans_resnet.fit(np.array(descriptors_resnet))
+    kmeans_resnet.fit(descriptors_resnet_km)
 
     # MeanShift clustering (sur données réduites par PCA) avec les bandwidth choisis
     if best_bw_hog is not None:
@@ -329,10 +339,10 @@ def pipeline(path_data=None, path_output=None):
 
 
     print("\n\n ##### Résultat ######")
-    metric_hist = show_metric(labels_true, kmeans_hist.labels_, descriptors_hist, bool_show=True, name_descriptor="HISTOGRAM", bool_return=True, name_model="kmeans")
-    metric_hog = show_metric(labels_true, kmeans_hog.labels_, descriptors_hog,bool_show=True, name_descriptor="HOG", bool_return=True, name_model="kmeans")
-    metric_hsv = show_metric(labels_true, kmeans_hsv.labels_, descriptors_hsv, bool_show=True, name_descriptor="HSV", bool_return=True, name_model="kmeans")
-    metric_resnet = show_metric(labels_true, kmeans_resnet.labels_, descriptors_resnet, bool_show=True, name_descriptor="RESNET50", bool_return=True, name_model="kmeans")
+    metric_hist = show_metric(labels_true, kmeans_hist.labels_, descriptors_hist_km, bool_show=True, name_descriptor="HISTOGRAM", bool_return=True, name_model="kmeans")
+    metric_hog = show_metric(labels_true, kmeans_hog.labels_, descriptors_hog_km,bool_show=True, name_descriptor="HOG", bool_return=True, name_model="kmeans")
+    metric_hsv = show_metric(labels_true, kmeans_hsv.labels_, descriptors_hsv_km, bool_show=True, name_descriptor="HSV", bool_return=True, name_model="kmeans")
+    metric_resnet = show_metric(labels_true, kmeans_resnet.labels_, descriptors_resnet_km, bool_show=True, name_descriptor="RESNET50", bool_return=True, name_model="kmeans")
 
     metric_hist_ms = show_metric(labels_true, meanshift_hist.labels_, descriptors_hist, bool_show=True, name_descriptor="HISTOGRAM", bool_return=True, name_model="meanshift")
     metric_hog_ms = show_metric(labels_true, meanshift_hog.labels_, descriptors_hog, bool_show=True, name_descriptor="HOG", bool_return=True, name_model="meanshift")
