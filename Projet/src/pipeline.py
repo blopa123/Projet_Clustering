@@ -10,6 +10,7 @@ try:
         compute_color_histograms_hsv,
         compute_gray_histograms,
         compute_hog_descriptors,
+        compute_lbp_descriptors,
         compute_resnet50_descriptors,
     )
     from .clustering import show_metric
@@ -21,6 +22,7 @@ except ImportError:
         compute_color_histograms_hsv,
         compute_gray_histograms,
         compute_hog_descriptors,
+        compute_lbp_descriptors,
         compute_resnet50_descriptors,
     )
     from clustering import show_metric
@@ -29,6 +31,7 @@ except ImportError:
 from sklearn.cluster import KMeans as SKLearnKMeans
 from sklearn.cluster import MeanShift as SKLearnMeanShift
 from sklearn.cluster import estimate_bandwidth
+from sklearn.cluster import SpectralClustering as SKLearnSpectralClustering
 from sklearn.decomposition import PCA
 
 
@@ -127,6 +130,8 @@ def pipeline(path_data=None, path_output=None):
     descriptors_hist = compute_gray_histograms(images_gray)
     print("- calcul features HSV...")
     descriptors_hsv = compute_color_histograms_hsv(images_bgr)
+    print("- calcul features LBP...")
+    descriptors_lbp = compute_lbp_descriptors(images_gray)
     print("- calcul features ResNet50...")
     descriptors_resnet = compute_resnet50_descriptors(images_gray)
 
@@ -139,23 +144,28 @@ def pipeline(path_data=None, path_output=None):
     scaler_ms_hog = StandardScaler()
     scaler_ms_hist = StandardScaler()
     scaler_ms_hsv = StandardScaler()
+    scaler_ms_lbp = StandardScaler()
     scaler_ms_resnet = StandardScaler()
     descriptors_hog_ms = scaler_ms_hog.fit_transform(np.array(descriptors_hog))
     descriptors_hist_ms = scaler_ms_hist.fit_transform(np.array(descriptors_hist))
     descriptors_hsv_ms = scaler_ms_hsv.fit_transform(np.array(descriptors_hsv))
+    descriptors_lbp_ms = scaler_ms_lbp.fit_transform(np.array(descriptors_lbp))
     descriptors_resnet_ms = scaler_ms_resnet.fit_transform(np.array(descriptors_resnet))
 
     n_comp_hog = _safe_n_components(descriptors_hog_ms, target=10)
     n_comp_hist = _safe_n_components(descriptors_hist_ms, target=10)
     n_comp_hsv = _safe_n_components(descriptors_hsv_ms, target=10)
+    n_comp_lbp = _safe_n_components(descriptors_lbp_ms, target=10)
     n_comp_resnet = _safe_n_components(descriptors_resnet_ms, target=10)
     pca_hog = PCA(n_components=n_comp_hog)
     pca_hist = PCA(n_components=n_comp_hist)
     pca_hsv = PCA(n_components=n_comp_hsv)
+    pca_lbp = PCA(n_components=n_comp_lbp)
     pca_resnet = PCA(n_components=n_comp_resnet)
     descriptors_hog_pca = pca_hog.fit_transform(descriptors_hog_ms)
     descriptors_hist_pca = pca_hist.fit_transform(descriptors_hist_ms)
     descriptors_hsv_pca = pca_hsv.fit_transform(descriptors_hsv_ms)
+    descriptors_lbp_pca = pca_lbp.fit_transform(descriptors_lbp_ms)
     descriptors_resnet_pca = pca_resnet.fit_transform(descriptors_resnet_ms)
 
     print(
@@ -163,6 +173,7 @@ def pipeline(path_data=None, path_output=None):
         f"HOG -> {n_comp_hog} dims, "
         f"HIST -> {n_comp_hist} dims, "
         f"HSV -> {n_comp_hsv} dims, "
+        f"LBP -> {n_comp_lbp} dims, "
         f"RESNET50 -> {n_comp_resnet} dims"
     )
 
@@ -174,6 +185,7 @@ def pipeline(path_data=None, path_output=None):
     results_hog = []
     results_hist = []
     results_hsv = []
+    results_lbp = []
     results_resnet = []
     target = number_cluster
     for q in quantiles:
@@ -225,11 +237,24 @@ def pipeline(path_data=None, path_output=None):
             n_resnet = None
         results_resnet.append((q, bw3, n_resnet))
 
+        # LBP
+        try:
+            bw_lbp = estimate_bandwidth(descriptors_lbp_pca, quantile=q, n_samples=min(500, len(descriptors_lbp_pca)))
+            if bw_lbp is None or bw_lbp <= 0:
+                n_lbp = None
+            else:
+                n_lbp = len(np.unique(SKLearnMeanShift(bandwidth=bw_lbp, bin_seeding=True).fit(descriptors_lbp_pca).labels_))
+        except Exception:
+            bw_lbp = None
+            n_lbp = None
+        results_lbp.append((q, bw_lbp, n_lbp))
+
         print(
             f"quantile={q:.3f} -> "
             f"HOG: bw={bw}, n_clusters={n_hog} | "
             f"HIST: bw={bw2}, n_clusters={n_hist} | "
             f"HSV: bw={bw_hsv}, n_clusters={n_hsv} | "
+            f"LBP: bw={bw_lbp}, n_clusters={n_lbp} | "
             f"RESNET50: bw={bw3}, n_clusters={n_resnet}"
         )
 
@@ -252,6 +277,7 @@ def pipeline(path_data=None, path_output=None):
     best_hog = _choose_best(results_hog, target)
     best_hist = _choose_best(results_hist, target)
     best_hsv = _choose_best(results_hsv, target)
+    best_lbp = _choose_best(results_lbp, target)
     best_resnet = _choose_best(results_resnet, target)
 
     if best_hog[1] is None:
@@ -275,6 +301,13 @@ def pipeline(path_data=None, path_output=None):
         best_bw_hsv = best_hsv[1]
         print(f"Choix HSV -> quantile={best_hsv[0]:.3f}, bandwidth={best_bw_hsv}, clusters={best_hsv[2]}")
 
+    if best_lbp[1] is None:
+        print("Aucun bandwidth utile trouvé pour LBP via estimate_bandwidth; utilisation du bandwidth par défaut.")
+        best_bw_lbp = None
+    else:
+        best_bw_lbp = best_lbp[1]
+        print(f"Choix LBP -> quantile={best_lbp[0]:.3f}, bandwidth={best_bw_lbp}, clusters={best_lbp[2]}")
+
     if best_resnet[1] is None:
         print("Aucun bandwidth utile trouvé pour RESNET50 via estimate_bandwidth; utilisation du bandwidth par défaut.")
         best_bw_resnet = None
@@ -286,6 +319,7 @@ def pipeline(path_data=None, path_output=None):
     kmeans_hog = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
     kmeans_hist = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
     kmeans_hsv = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
+    kmeans_lbp = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
     kmeans_resnet = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
 
     print("- calcul kmeans avec features HOG ...")
@@ -294,6 +328,8 @@ def pipeline(path_data=None, path_output=None):
     kmeans_hist.fit(np.array(descriptors_hist))
     print("- calcul kmeans avec features HSV...")
     kmeans_hsv.fit(np.array(descriptors_hsv))
+    print("- calcul kmeans avec features LBP...")
+    kmeans_lbp.fit(np.array(descriptors_lbp))
     print("- calcul kmeans avec features ResNet50...")
     kmeans_resnet.fit(np.array(descriptors_resnet))
 
@@ -313,6 +349,11 @@ def pipeline(path_data=None, path_output=None):
     else:
         meanshift_hsv = SKLearnMeanShift()
 
+    if best_bw_lbp is not None:
+        meanshift_lbp = SKLearnMeanShift(bandwidth=best_bw_lbp, bin_seeding=True)
+    else:
+        meanshift_lbp = SKLearnMeanShift()
+
     if best_bw_resnet is not None:
         meanshift_resnet = SKLearnMeanShift(bandwidth=best_bw_resnet, bin_seeding=True)
     else:
@@ -324,20 +365,48 @@ def pipeline(path_data=None, path_output=None):
     meanshift_hist.fit(descriptors_hist_pca)
     print("- calcul meanshift avec features HSV (PCA réduit)...")
     meanshift_hsv.fit(descriptors_hsv_pca)
+    print("- calcul meanshift avec features LBP (PCA réduit)...")
+    meanshift_lbp.fit(descriptors_lbp_pca)
     print("- calcul meanshift avec features ResNet50 (PCA réduit)...")
     meanshift_resnet.fit(descriptors_resnet_pca)
+
+    # Spectral clustering (sur données réduites par PCA), même approche que MeanShift.
+    spectral_hog = SKLearnSpectralClustering(n_clusters=number_cluster, affinity='nearest_neighbors', n_neighbors=10, random_state=0)
+    spectral_hist = SKLearnSpectralClustering(n_clusters=number_cluster, affinity='nearest_neighbors', n_neighbors=10, random_state=0)
+    spectral_hsv = SKLearnSpectralClustering(n_clusters=number_cluster, affinity='nearest_neighbors', n_neighbors=10, random_state=0)
+    spectral_lbp = SKLearnSpectralClustering(n_clusters=number_cluster, affinity='nearest_neighbors', n_neighbors=10, random_state=0)
+    spectral_resnet = SKLearnSpectralClustering(n_clusters=number_cluster, affinity='nearest_neighbors', n_neighbors=10, random_state=0)
+
+    print("- calcul spectral clustering avec features HOG (PCA réduit)...")
+    spectral_hog.fit(descriptors_hog_pca)
+    print("- calcul spectral clustering avec features Histogram (PCA réduit)...")
+    spectral_hist.fit(descriptors_hist_pca)
+    print("- calcul spectral clustering avec features HSV (PCA réduit)...")
+    spectral_hsv.fit(descriptors_hsv_pca)
+    print("- calcul spectral clustering avec features LBP (PCA réduit)...")
+    spectral_lbp.fit(descriptors_lbp_pca)
+    print("- calcul spectral clustering avec features ResNet50 (PCA réduit)...")
+    spectral_resnet.fit(descriptors_resnet_pca)
 
 
     print("\n\n ##### Résultat ######")
     metric_hist = show_metric(labels_true, kmeans_hist.labels_, descriptors_hist, bool_show=True, name_descriptor="HISTOGRAM", bool_return=True, name_model="kmeans")
     metric_hog = show_metric(labels_true, kmeans_hog.labels_, descriptors_hog,bool_show=True, name_descriptor="HOG", bool_return=True, name_model="kmeans")
     metric_hsv = show_metric(labels_true, kmeans_hsv.labels_, descriptors_hsv, bool_show=True, name_descriptor="HSV", bool_return=True, name_model="kmeans")
+    metric_lbp = show_metric(labels_true, kmeans_lbp.labels_, descriptors_lbp, bool_show=True, name_descriptor="LBP", bool_return=True, name_model="kmeans")
     metric_resnet = show_metric(labels_true, kmeans_resnet.labels_, descriptors_resnet, bool_show=True, name_descriptor="RESNET50", bool_return=True, name_model="kmeans")
 
     metric_hist_ms = show_metric(labels_true, meanshift_hist.labels_, descriptors_hist, bool_show=True, name_descriptor="HISTOGRAM", bool_return=True, name_model="meanshift")
     metric_hog_ms = show_metric(labels_true, meanshift_hog.labels_, descriptors_hog, bool_show=True, name_descriptor="HOG", bool_return=True, name_model="meanshift")
     metric_hsv_ms = show_metric(labels_true, meanshift_hsv.labels_, descriptors_hsv, bool_show=True, name_descriptor="HSV", bool_return=True, name_model="meanshift")
+    metric_lbp_ms = show_metric(labels_true, meanshift_lbp.labels_, descriptors_lbp, bool_show=True, name_descriptor="LBP", bool_return=True, name_model="meanshift")
     metric_resnet_ms = show_metric(labels_true, meanshift_resnet.labels_, descriptors_resnet, bool_show=True, name_descriptor="RESNET50", bool_return=True, name_model="meanshift")
+
+    metric_hist_sc = show_metric(labels_true, spectral_hist.labels_, descriptors_hist, bool_show=True, name_descriptor="HISTOGRAM", bool_return=True, name_model="spectralclustering")
+    metric_hog_sc = show_metric(labels_true, spectral_hog.labels_, descriptors_hog, bool_show=True, name_descriptor="HOG", bool_return=True, name_model="spectralclustering")
+    metric_hsv_sc = show_metric(labels_true, spectral_hsv.labels_, descriptors_hsv, bool_show=True, name_descriptor="HSV", bool_return=True, name_model="spectralclustering")
+    metric_lbp_sc = show_metric(labels_true, spectral_lbp.labels_, descriptors_lbp, bool_show=True, name_descriptor="LBP", bool_return=True, name_model="spectralclustering")
+    metric_resnet_sc = show_metric(labels_true, spectral_resnet.labels_, descriptors_resnet, bool_show=True, name_descriptor="RESNET50", bool_return=True, name_model="spectralclustering")
 
 
     print("- export des données vers le dashboard")
@@ -346,11 +415,18 @@ def pipeline(path_data=None, path_output=None):
         metric_hist,
         metric_hog,
         metric_hsv,
+        metric_lbp,
         metric_resnet,
         metric_hist_ms,
         metric_hog_ms,
         metric_hsv_ms,
+        metric_lbp_ms,
         metric_resnet_ms,
+        metric_hist_sc,
+        metric_hog_sc,
+        metric_hsv_sc,
+        metric_lbp_sc,
+        metric_resnet_sc,
     ]
     df_metric = pd.DataFrame(list_dict)
     
@@ -359,25 +435,36 @@ def pipeline(path_data=None, path_output=None):
     descriptors_hist_norm = scaler.fit_transform(descriptors_hist)
     descriptors_hog_norm = scaler.fit_transform(descriptors_hog)
     descriptors_hsv_norm = scaler.fit_transform(descriptors_hsv)
+    descriptors_lbp_norm = scaler.fit_transform(descriptors_lbp)
     descriptors_resnet_norm = scaler.fit_transform(descriptors_resnet)
 
     #conversion vers un format 3D pour la visualisation
     x_3d_hist = conversion_3d(descriptors_hist_norm)
     x_3d_hog = conversion_3d(descriptors_hog_norm)
     x_3d_hsv = conversion_3d(descriptors_hsv_norm)
+    x_3d_lbp = conversion_3d(descriptors_lbp_norm)
     x_3d_resnet = conversion_3d(descriptors_resnet_norm)
 
     # création des dataframe pour la sauvegarde des données pour la visualisation
     df_hist = create_df_to_export(x_3d_hist, labels_true, kmeans_hist.labels_)
     df_hog = create_df_to_export(x_3d_hog, labels_true, kmeans_hog.labels_)
     df_hsv = create_df_to_export(x_3d_hsv, labels_true, kmeans_hsv.labels_)
+    df_lbp = create_df_to_export(x_3d_lbp, labels_true, kmeans_lbp.labels_)
     df_resnet = create_df_to_export(x_3d_resnet, labels_true, kmeans_resnet.labels_)
 
     # Dataframes for MeanShift
     df_hist_meanshift = create_df_to_export(x_3d_hist, labels_true, meanshift_hist.labels_)
     df_hog_meanshift = create_df_to_export(x_3d_hog, labels_true, meanshift_hog.labels_)
     df_hsv_meanshift = create_df_to_export(x_3d_hsv, labels_true, meanshift_hsv.labels_)
+    df_lbp_meanshift = create_df_to_export(x_3d_lbp, labels_true, meanshift_lbp.labels_)
     df_resnet_meanshift = create_df_to_export(x_3d_resnet, labels_true, meanshift_resnet.labels_)
+
+    # Dataframes for SpectralClustering
+    df_hist_spectral = create_df_to_export(x_3d_hist, labels_true, spectral_hist.labels_)
+    df_hog_spectral = create_df_to_export(x_3d_hog, labels_true, spectral_hog.labels_)
+    df_hsv_spectral = create_df_to_export(x_3d_hsv, labels_true, spectral_hsv.labels_)
+    df_lbp_spectral = create_df_to_export(x_3d_lbp, labels_true, spectral_lbp.labels_)
+    df_resnet_spectral = create_df_to_export(x_3d_resnet, labels_true, spectral_resnet.labels_)
 
     # Vérifie si le dossier existe déjà
     if not os.path.exists(output_path):
@@ -388,11 +475,18 @@ def pipeline(path_data=None, path_output=None):
     save_dataframe_multi_format(df_hist, output_path, "save_clustering_hist_kmeans")
     save_dataframe_multi_format(df_hog, output_path, "save_clustering_hog_kmeans")
     save_dataframe_multi_format(df_hsv, output_path, "save_clustering_hsv_kmeans")
+    save_dataframe_multi_format(df_lbp, output_path, "save_clustering_lbp_kmeans")
     save_dataframe_multi_format(df_resnet, output_path, "save_clustering_resnet_kmeans")
     save_dataframe_multi_format(df_hist_meanshift, output_path, "save_clustering_hist_meanshift")
     save_dataframe_multi_format(df_hog_meanshift, output_path, "save_clustering_hog_meanshift")
     save_dataframe_multi_format(df_hsv_meanshift, output_path, "save_clustering_hsv_meanshift")
+    save_dataframe_multi_format(df_lbp_meanshift, output_path, "save_clustering_lbp_meanshift")
     save_dataframe_multi_format(df_resnet_meanshift, output_path, "save_clustering_resnet_meanshift")
+    save_dataframe_multi_format(df_hist_spectral, output_path, "save_clustering_hist_spectralclustering")
+    save_dataframe_multi_format(df_hog_spectral, output_path, "save_clustering_hog_spectralclustering")
+    save_dataframe_multi_format(df_hsv_spectral, output_path, "save_clustering_hsv_spectralclustering")
+    save_dataframe_multi_format(df_lbp_spectral, output_path, "save_clustering_lbp_spectralclustering")
+    save_dataframe_multi_format(df_resnet_spectral, output_path, "save_clustering_resnet_spectralclustering")
     save_dataframe_multi_format(df_metric, output_path, "save_metric")
     print(f"Résultats exportés dans: {output_path}")
     print("Fin. \n\n Pour avoir la visualisation dashboard, veuillez lancer la commande : python dashboard.py --path_data chemin_vers_les_analyse_ia")

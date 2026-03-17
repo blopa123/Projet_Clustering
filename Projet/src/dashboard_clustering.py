@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.cluster import MeanShift, estimate_bandwidth
+from sklearn.cluster import SpectralClustering
 from sklearn.metrics import silhouette_score
 import plotly.express as px
 import cv2
@@ -13,6 +14,7 @@ try:
         compute_color_histograms_hsv,
         compute_gray_histograms,
         compute_hog_descriptors,
+        compute_lbp_descriptors,
         compute_resnet50_descriptors,
     )
     from .constant import PATH_DATA, PATH_OUTPUT, REPO_ROOT, LEGACY_PATH_DATA
@@ -21,6 +23,7 @@ except ImportError:
         compute_color_histograms_hsv,
         compute_gray_histograms,
         compute_hog_descriptors,
+        compute_lbp_descriptors,
         compute_resnet50_descriptors,
     )
     from constant import PATH_DATA, PATH_OUTPUT, REPO_ROOT, LEGACY_PATH_DATA
@@ -115,6 +118,8 @@ def compute_descriptor_matrix(images_gray, images_bgr, descriptor):
         return compute_hog_descriptors(images_gray)
     if descriptor == "HSV":
         return compute_color_histograms_hsv(images_bgr)
+    if descriptor == "LBP":
+        return compute_lbp_descriptors(images_gray)
     if descriptor == "RESNET50":
         return compute_resnet50_descriptors(images_gray)
     return compute_gray_histograms(images_gray)
@@ -133,6 +138,9 @@ def compute_silhouette_tracking(descriptors, model_name, k_values):
         try:
             if model_name == "kmeans":
                 model = KMeans(n_clusters=k, random_state=0)
+                labels = model.fit_predict(descriptors)
+            elif model_name == "spectralclustering":
+                model = SpectralClustering(n_clusters=k, affinity='nearest_neighbors', n_neighbors=10, random_state=0)
                 labels = model.fit_predict(descriptors)
             else:
                 quantile = min(0.5, max(0.01, k / max(1, n_samples)))
@@ -166,11 +174,18 @@ df_metric = read_analysis_file(analysis_dir, "save_metric")
 df_hist_kmeans = read_analysis_file(analysis_dir, "save_clustering_hist_kmeans")
 df_hog_kmeans = read_analysis_file(analysis_dir, "save_clustering_hog_kmeans")
 df_hsv_kmeans = read_analysis_file(analysis_dir, "save_clustering_hsv_kmeans")
+df_lbp_kmeans = read_analysis_file(analysis_dir, "save_clustering_lbp_kmeans")
 df_resnet_kmeans = read_analysis_file(analysis_dir, "save_clustering_resnet_kmeans")
 df_hist_meanshift = read_analysis_file(analysis_dir, "save_clustering_hist_meanshift")
 df_hog_meanshift = read_analysis_file(analysis_dir, "save_clustering_hog_meanshift")
 df_hsv_meanshift = read_analysis_file(analysis_dir, "save_clustering_hsv_meanshift")
+df_lbp_meanshift = read_analysis_file(analysis_dir, "save_clustering_lbp_meanshift")
 df_resnet_meanshift = read_analysis_file(analysis_dir, "save_clustering_resnet_meanshift")
+df_hist_spectral = read_analysis_file(analysis_dir, "save_clustering_hist_spectralclustering")
+df_hog_spectral = read_analysis_file(analysis_dir, "save_clustering_hog_spectralclustering")
+df_hsv_spectral = read_analysis_file(analysis_dir, "save_clustering_hsv_spectralclustering")
+df_lbp_spectral = read_analysis_file(analysis_dir, "save_clustering_lbp_spectralclustering")
+df_resnet_spectral = read_analysis_file(analysis_dir, "save_clustering_resnet_spectralclustering")
 
 if df_metric is None:
     st.error(f"Aucun fichier métrique trouvé dans: {analysis_dir}")
@@ -193,9 +208,9 @@ with tab1:
     st.write('## Résultat de Clustering des données SNACK')
     st.sidebar.write("####  Veuillez sélectionner les clusters à analyser" )
     # Sélection du modèle
-    model = st.sidebar.selectbox('Sélectionner le modèle de clustering', ["kmeans", "meanshift"])
+    model = st.sidebar.selectbox('Sélectionner le modèle de clustering', ["kmeans", "meanshift", "spectralclustering"])
     # Sélection des descripteurs
-    descriptor =  st.sidebar.selectbox('Sélectionner un descripteur', ["HISTOGRAM","HOG", "HSV", "RESNET50"])
+    descriptor =  st.sidebar.selectbox('Sélectionner un descripteur', ["HISTOGRAM","HOG", "HSV", "LBP", "RESNET50"])
     # Récupérer le dataframe correspondant au modèle et au descripteur
     df = None
     if model == "kmeans":
@@ -205,17 +220,32 @@ with tab1:
             df = df_hog_kmeans
         elif descriptor == "HSV":
             df = df_hsv_kmeans
+        elif descriptor == "LBP":
+            df = df_lbp_kmeans
         else:
             df = df_resnet_kmeans
-    else:
+    elif model == "meanshift":
         if descriptor == "HISTOGRAM":
             df = df_hist_meanshift
         elif descriptor == "HOG":
             df = df_hog_meanshift
         elif descriptor == "HSV":
             df = df_hsv_meanshift
+        elif descriptor == "LBP":
+            df = df_lbp_meanshift
         else:
             df = df_resnet_meanshift
+    else:
+        if descriptor == "HISTOGRAM":
+            df = df_hist_spectral
+        elif descriptor == "HOG":
+            df = df_hog_spectral
+        elif descriptor == "HSV":
+            df = df_hsv_spectral
+        elif descriptor == "LBP":
+            df = df_lbp_spectral
+        else:
+            df = df_resnet_spectral
 
     if df is None:
         st.warning("Données manquantes pour le modèle/descripteur sélectionné. Exécutez le pipeline d'abord.")

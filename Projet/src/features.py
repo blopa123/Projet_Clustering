@@ -2,6 +2,7 @@ import os
 import cv2
 import numpy as np
 from skimage.feature import hog
+from skimage.feature import local_binary_pattern
 from skimage import transform
 import itertools
 
@@ -104,4 +105,27 @@ def compute_color_histograms_hsv(images_bgr):
         descriptor = descriptor / (descriptor.sum() + 1e-7)
 
         descriptors.append(descriptor)
+    return np.array(descriptors)
+
+
+def compute_lbp_descriptors(images, radius=2, n_points=16, method="uniform"):
+    """
+    Calcule un descripteur LBP global par image via histogramme normalise.
+    Input : images (array) : images en niveaux de gris
+            radius (int) : rayon du voisinage LBP
+            n_points (int) : nombre de points echantillonnes
+            method (str) : methode LBP (uniform recommande)
+    Output : descriptors (array) : histogrammes LBP normalises
+    """
+    descriptors = []
+    n_bins = n_points + 2 if method == "uniform" else int(2 ** n_points)
+
+    for image in images:
+        image_uint8 = image.astype(np.uint8)
+        lbp = local_binary_pattern(image_uint8, P=n_points, R=radius, method=method)
+        hist, _ = np.histogram(lbp.ravel(), bins=n_bins, range=(0, n_bins))
+        hist = hist.astype(np.float32)
+        hist /= (hist.sum() + 1e-7)
+        descriptors.append(hist)
+
     return np.array(descriptors)
