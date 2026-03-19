@@ -17,7 +17,7 @@ def compute_gray_histograms(images):
     for image in images:
         # Convertir l'image en uint8 pour cv2.calcHist
         image_uint8 = image.astype(np.uint8)
-        hist = cv2.calcHist([image_uint8], [0], None, [256], [0, 256])
+        hist = cv2.calcHist([image_uint8], [0], None, [64], [0, 256])
         descriptors.append(hist.flatten())
     return np.array(descriptors)
 
@@ -29,7 +29,7 @@ def compute_hog_descriptors(images):
     """
     descriptors = []
     for image in images:
-        fd = hog(image, orientations=12, 
+        fd = hog(image, orientations=14, 
                  pixels_per_cell=(8, 8),
                  cells_per_block=(2, 2), 
                  visualize=False)
@@ -37,7 +37,7 @@ def compute_hog_descriptors(images):
     return np.array(descriptors)
 
 
-def compute_resnet50_descriptors(images, batch_size=32, layer_name="avg_pool"):
+def compute_resnet50_descriptors(images, batch_size=32, layer_name="conv5_block3_out"):
     """
     layer_name options :
       - "avg_pool"      : sortie standard 2048 dims (pooling avg)
@@ -84,25 +84,30 @@ def compute_resnet50_descriptors(images, batch_size=32, layer_name="avg_pool"):
 
 def compute_color_histograms_hsv(images_bgr):
     """
-    Calcule des histogrammes HSV pondérés pour des images BGR.
-    H : 36 bins  (couleur pure — le plus discriminant)
+    Calcule des histogrammes HSV pour des images BGR.
+    H : 48 bins  (couleur pure — le plus discriminant)
     S : 32 bins  (saturation)
     V : 16 bins  (luminosité — le moins discriminant)
     """
+    eps = 1e-7
     descriptors = []
     for image in images_bgr:
         image_uint8 = image.astype(np.uint8)
         hsv = cv2.cvtColor(image_uint8, cv2.COLOR_BGR2HSV)
 
         # Histogrammes par canal avec bins adaptés à l'importance
-        h_hist = cv2.calcHist([hsv], [0], None, [36], [0, 180]).flatten()
+        h_hist = cv2.calcHist([hsv], [0], None, [48], [0, 180]).flatten()
         s_hist = cv2.calcHist([hsv], [1], None, [32], [0, 256]).flatten()
         v_hist = cv2.calcHist([hsv], [2], None, [16], [0, 256]).flatten()
+        # Normalisation par bloc pour éviter qu'un histogramme domine les autres.
+        h_hist = h_hist / (h_hist.sum() + eps)
+        s_hist = s_hist / (s_hist.sum() + eps)
+        v_hist = v_hist / (v_hist.sum() + eps)
 
         descriptor = np.concatenate([h_hist, s_hist, v_hist])
 
-        # Normalisation L1 — invariante à la taille de l'image
-        descriptor = descriptor / (descriptor.sum() + 1e-7)
+        # Normalisation finale pour stabiliser l'échelle entre images.
+        descriptor = descriptor / (np.linalg.norm(descriptor) + eps)
 
         descriptors.append(descriptor)
     return np.array(descriptors)

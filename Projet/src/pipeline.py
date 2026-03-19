@@ -1,9 +1,10 @@
 import argparse
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, Normalizer
 import numpy as np
 import os
 import pandas as pd
 import cv2
+from sklearn.metrics import silhouette_score
 
 try:
     from .features import (
@@ -36,7 +37,7 @@ from sklearn.decomposition import PCA
 
 
 
-def load_snack_images(data_path, img_size=(64, 64)):
+def load_snack_images(data_path, img_size=(128, 128)):
     """
     Charge les images depuis le dossier de données SNACK
     Input : data_path (str) : chemin vers le dossier contenant les images
@@ -133,12 +134,73 @@ def pipeline(path_data=None, path_output=None):
     print("- calcul features LBP...")
     descriptors_lbp = compute_lbp_descriptors(images_gray)
     print("- calcul features ResNet50...")
-    descriptors_resnet = compute_resnet50_descriptors(images_gray)
+    descriptors_resnet = compute_resnet50_descriptors(images_bgr)
 
-    # Réduction de dimension pour MeanShift (PCA ~10 dims)
-    def _safe_n_components(X, target=10):
-        n_samples, n_features = X.shape[0], X.shape[1]
-        return max(1, min(target, n_features, max(1, n_samples - 1)))
+    # Normalisation pour KMeans : met toutes les dimensions sur une echelle comparable.
+    scaler_km_hog = StandardScaler()
+    scaler_km_hist = StandardScaler()
+    scaler_km_hsv = StandardScaler()
+    normalizer_km_resnet = Normalizer(norm="l2")
+    scaler_km_resnet = StandardScaler()
+    descriptors_hog_km = scaler_km_hog.fit_transform(np.array(descriptors_hog))
+    descriptors_hist_km = scaler_km_hist.fit_transform(np.array(descriptors_hist))
+    descriptors_hsv_km = scaler_km_hsv.fit_transform(np.array(descriptors_hsv))
+    descriptors_resnet_l2 = normalizer_km_resnet.fit_transform(np.array(descriptors_resnet))
+    descriptors_resnet_km_scaled = scaler_km_resnet.fit_transform(descriptors_resnet_l2)
+    pca_km_resnet = PCA(n_components=0.90, svd_solver="full", random_state=0)
+    descriptors_resnet_km = pca_km_resnet.fit_transform(descriptors_resnet_km_scaled)
+    print(
+        "ResNet KMeans preprocessing: "
+        f"L2 + StandardScaler + PCA(90%) -> {descriptors_resnet_km.shape[1]} dims"
+    )
+
+    # Tester un petit voisinage autour de 20 pour KMeans.
+    kmeans_candidates = sorted({18, 19, 20, 21, 22, len(label_names)})
+
+    def _select_best_kmeans_model(X, candidates, random_state=0):
+        best_model = None
+        best_k = None
+        best_sil = -np.inf
+        n_samples = X.shape[0]
+
+        for k in candidates:
+            if k <= 1 or k >= n_samples:
+                continue
+            model = SKLearnKMeans(
+                n_clusters=k,
+                init="k-means++",
+                n_init=50,
+                max_iter=1000,
+                algorithm="elkan",
+                random_state=random_state,
+            )
+            labels = model.fit_predict(X)
+            if len(np.unique(labels)) < 2:
+                continue
+            score = silhouette_score(X, labels)
+            if score > best_sil:
+                best_sil = score
+                best_k = k
+                best_model = model
+
+        if best_model is None:
+            fallback_k = min(20, max(2, n_samples - 1))
+            best_model = SKLearnKMeans(
+                n_clusters=fallback_k,
+                init="k-means++",
+                n_init=50,
+                max_iter=1000,
+                algorithm="elkan",
+                random_state=random_state,
+            )
+            best_model.fit(X)
+            best_k = fallback_k
+            best_sil = None
+
+        return best_model, best_k, best_sil
+
+    # Réduction de dimension pour MeanShift: forcer un espace latent compact de 20 dimensions.
+    pca_target_dims = 20
 
     # Normalisation uniquement pour MeanShift (pas pour KMeans)
     scaler_ms_hog = StandardScaler()
@@ -146,6 +208,11 @@ def pipeline(path_data=None, path_output=None):
     scaler_ms_hsv = StandardScaler()
     scaler_ms_lbp = StandardScaler()
     scaler_ms_resnet = StandardScaler()
+    # L2 pour tous les descripteurs afin d'homogeneiser les distances.
+    scaler_ms_hog = Normalizer(norm="l2")
+    scaler_ms_hist = Normalizer(norm="l2")
+    scaler_ms_hsv = Normalizer(norm="l2")
+    scaler_ms_resnet = Normalizer(norm="l2")
     descriptors_hog_ms = scaler_ms_hog.fit_transform(np.array(descriptors_hog))
     descriptors_hist_ms = scaler_ms_hist.fit_transform(np.array(descriptors_hist))
     descriptors_hsv_ms = scaler_ms_hsv.fit_transform(np.array(descriptors_hsv))
@@ -167,9 +234,23 @@ def pipeline(path_data=None, path_output=None):
     descriptors_hsv_pca = pca_hsv.fit_transform(descriptors_hsv_ms)
     descriptors_lbp_pca = pca_lbp.fit_transform(descriptors_lbp_ms)
     descriptors_resnet_pca = pca_resnet.fit_transform(descriptors_resnet_ms)
+    def _pca_fixed_dims_for_ms(X, target_dims):
+        n_components = min(target_dims, X.shape[1], max(1, X.shape[0] - 1))
+        return PCA(n_components=n_components, svd_solver="full").fit_transform(X)
+
+    descriptors_hog_pca = _pca_fixed_dims_for_ms(descriptors_hog_ms, pca_target_dims)
+    descriptors_hist_pca = _pca_fixed_dims_for_ms(descriptors_hist_ms, pca_target_dims)
+    descriptors_hsv_pca = _pca_fixed_dims_for_ms(descriptors_hsv_ms, pca_target_dims)
+    descriptors_resnet_pca = _pca_fixed_dims_for_ms(descriptors_resnet_ms, pca_target_dims)
+
+    n_comp_hog = descriptors_hog_pca.shape[1]
+    n_comp_hist = descriptors_hist_pca.shape[1]
+    n_comp_hsv = descriptors_hsv_pca.shape[1]
+    n_comp_resnet = descriptors_resnet_pca.shape[1]
 
     print(
         "Applied PCA: "
+        f"target_dims={pca_target_dims}, "
         f"HOG -> {n_comp_hog} dims, "
         f"HIST -> {n_comp_hist} dims, "
         f"HSV -> {n_comp_hsv} dims, "
@@ -181,7 +262,7 @@ def pipeline(path_data=None, path_output=None):
 
     # Recherche automatique de bandwidth via estimate_bandwidth (grid de quantiles)
     print("Recherche automatique de bandwidth via estimate_bandwidth (grid de quantiles)...")
-    quantiles = list(np.linspace(0.01, 0.5, 20))
+    quantiles = list(np.linspace(0.005, 0.3, 30))
     results_hog = []
     results_hist = []
     results_hsv = []
@@ -191,11 +272,11 @@ def pipeline(path_data=None, path_output=None):
     for q in quantiles:
         # HOG
         try:
-            bw = estimate_bandwidth(descriptors_hog_pca, quantile=q, n_samples=min(500, len(descriptors_hog_pca)))
+            bw = estimate_bandwidth(descriptors_hog_pca, quantile=q, n_samples=min(952, len(descriptors_hog_pca)))
             if bw is None or bw <= 0:
                 n_hog = None
             else:
-                n_hog = len(np.unique(SKLearnMeanShift(bandwidth=bw, bin_seeding=True).fit(descriptors_hog_pca).labels_))
+                n_hog = len(np.unique(SKLearnMeanShift(bandwidth=bw, bin_seeding=True, min_bin_freq=5, cluster_all=False).fit(descriptors_hog_pca).labels_))
         except Exception:
             bw = None
             n_hog = None
@@ -203,11 +284,11 @@ def pipeline(path_data=None, path_output=None):
 
         # HIST
         try:
-            bw2 = estimate_bandwidth(descriptors_hist_pca, quantile=q, n_samples=min(500, len(descriptors_hist_pca)))
+            bw2 = estimate_bandwidth(descriptors_hist_pca, quantile=q,n_samples=len(descriptors_hog_pca))
             if bw2 is None or bw2 <= 0:
                 n_hist = None
             else:
-                n_hist = len(np.unique(SKLearnMeanShift(bandwidth=bw2, bin_seeding=True).fit(descriptors_hist_pca).labels_))
+                n_hist = len(np.unique(SKLearnMeanShift(bandwidth=bw2, bin_seeding=True, min_bin_freq=5, cluster_all=False).fit(descriptors_hist_pca).labels_))
         except Exception:
             bw2 = None
             n_hist = None
@@ -215,11 +296,11 @@ def pipeline(path_data=None, path_output=None):
 
         # HSV
         try:
-            bw_hsv = estimate_bandwidth(descriptors_hsv_pca, quantile=q, n_samples=min(500, len(descriptors_hsv_pca)))
+            bw_hsv = estimate_bandwidth(descriptors_hsv_pca, quantile=q,n_samples=len(descriptors_hog_pca))
             if bw_hsv is None or bw_hsv <= 0:
                 n_hsv = None
             else:
-                n_hsv = len(np.unique(SKLearnMeanShift(bandwidth=bw_hsv, bin_seeding=True).fit(descriptors_hsv_pca).labels_))
+                n_hsv = len(np.unique(SKLearnMeanShift(bandwidth=bw_hsv, bin_seeding=True, min_bin_freq=5, cluster_all=False).fit(descriptors_hsv_pca).labels_))
         except Exception:
             bw_hsv = None
             n_hsv = None
@@ -227,11 +308,11 @@ def pipeline(path_data=None, path_output=None):
 
         # RESNET50
         try:
-            bw3 = estimate_bandwidth(descriptors_resnet_pca, quantile=q, n_samples=min(500, len(descriptors_resnet_pca)))
+            bw3 = estimate_bandwidth(descriptors_resnet_pca, quantile=q,n_samples=len(descriptors_hog_pca))
             if bw3 is None or bw3 <= 0:
                 n_resnet = None
             else:
-                n_resnet = len(np.unique(SKLearnMeanShift(bandwidth=bw3, bin_seeding=True).fit(descriptors_resnet_pca).labels_))
+                n_resnet = len(np.unique(SKLearnMeanShift(bandwidth=bw3, bin_seeding=True, min_bin_freq=5, cluster_all=False).fit(descriptors_resnet_pca).labels_))
         except Exception:
             bw3 = None
             n_resnet = None
@@ -316,6 +397,19 @@ def pipeline(path_data=None, path_output=None):
         print(f"Choix RESNET50 -> quantile={best_resnet[0]:.3f}, bandwidth={best_bw_resnet}, clusters={best_resnet[2]}")
 
     print("\n\n ##### Clustering ######")
+    print(f"- test KMeans n_clusters candidats: {kmeans_candidates}")
+    print("- calcul + sélection kmeans avec features HOG ...")
+    kmeans_hog, k_hog, sil_hog = _select_best_kmeans_model(descriptors_hog_km, kmeans_candidates)
+    print(f"  -> HOG: k={k_hog}, silhouette={sil_hog}")
+    print("- calcul + sélection kmeans avec features Histogram...")
+    kmeans_hist, k_hist, sil_hist = _select_best_kmeans_model(descriptors_hist_km, kmeans_candidates)
+    print(f"  -> HIST: k={k_hist}, silhouette={sil_hist}")
+    print("- calcul + sélection kmeans avec features HSV...")
+    kmeans_hsv, k_hsv, sil_hsv = _select_best_kmeans_model(descriptors_hsv_km, kmeans_candidates)
+    print(f"  -> HSV: k={k_hsv}, silhouette={sil_hsv}")
+    print("- calcul + sélection kmeans avec features ResNet50...")
+    kmeans_resnet, k_resnet, sil_resnet = _select_best_kmeans_model(descriptors_resnet_km, kmeans_candidates)
+    print(f"  -> RESNET50: k={k_resnet}, silhouette={sil_resnet}")
     kmeans_hog = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
     kmeans_hist = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
     kmeans_hsv = SKLearnKMeans(n_clusters=number_cluster, random_state=0)
@@ -335,19 +429,19 @@ def pipeline(path_data=None, path_output=None):
 
     # MeanShift clustering (sur données réduites par PCA) avec les bandwidth choisis
     if best_bw_hog is not None:
-        meanshift_hog = SKLearnMeanShift(bandwidth=best_bw_hog, bin_seeding=True)
+        meanshift_hog = SKLearnMeanShift(bandwidth=best_bw_hog, bin_seeding=True, min_bin_freq=5, cluster_all=False)
     else:
-        meanshift_hog = SKLearnMeanShift()
+        meanshift_hog = SKLearnMeanShift(cluster_all=False)
 
     if best_bw_hist is not None:
-        meanshift_hist = SKLearnMeanShift(bandwidth=best_bw_hist, bin_seeding=True)
+        meanshift_hist = SKLearnMeanShift(bandwidth=best_bw_hist, bin_seeding=True, min_bin_freq=5, cluster_all=False)
     else:
-        meanshift_hist = SKLearnMeanShift()
+        meanshift_hist = SKLearnMeanShift(cluster_all=False)
 
     if best_bw_hsv is not None:
-        meanshift_hsv = SKLearnMeanShift(bandwidth=best_bw_hsv, bin_seeding=True)
+        meanshift_hsv = SKLearnMeanShift(bandwidth=best_bw_hsv, bin_seeding=True, min_bin_freq=5, cluster_all=False)
     else:
-        meanshift_hsv = SKLearnMeanShift()
+        meanshift_hsv = SKLearnMeanShift(cluster_all=False)
 
     if best_bw_lbp is not None:
         meanshift_lbp = SKLearnMeanShift(bandwidth=best_bw_lbp, bin_seeding=True)
@@ -355,9 +449,9 @@ def pipeline(path_data=None, path_output=None):
         meanshift_lbp = SKLearnMeanShift()
 
     if best_bw_resnet is not None:
-        meanshift_resnet = SKLearnMeanShift(bandwidth=best_bw_resnet, bin_seeding=True)
+        meanshift_resnet = SKLearnMeanShift(bandwidth=best_bw_resnet, bin_seeding=True, min_bin_freq=5, cluster_all=False)
     else:
-        meanshift_resnet = SKLearnMeanShift()
+        meanshift_resnet = SKLearnMeanShift(cluster_all=False)
 
     print("- calcul meanshift avec features HOG (PCA réduit)...")
     meanshift_hog.fit(descriptors_hog_pca)
@@ -390,6 +484,10 @@ def pipeline(path_data=None, path_output=None):
 
 
     print("\n\n ##### Résultat ######")
+    metric_hist = show_metric(labels_true, kmeans_hist.labels_, descriptors_hist_km, bool_show=True, name_descriptor="HISTOGRAM", bool_return=True, name_model="kmeans")
+    metric_hog = show_metric(labels_true, kmeans_hog.labels_, descriptors_hog_km,bool_show=True, name_descriptor="HOG", bool_return=True, name_model="kmeans")
+    metric_hsv = show_metric(labels_true, kmeans_hsv.labels_, descriptors_hsv_km, bool_show=True, name_descriptor="HSV", bool_return=True, name_model="kmeans")
+    metric_resnet = show_metric(labels_true, kmeans_resnet.labels_, descriptors_resnet_km, bool_show=True, name_descriptor="RESNET50", bool_return=True, name_model="kmeans")
     metric_hist = show_metric(labels_true, kmeans_hist.labels_, descriptors_hist, bool_show=True, name_descriptor="HISTOGRAM", bool_return=True, name_model="kmeans")
     metric_hog = show_metric(labels_true, kmeans_hog.labels_, descriptors_hog,bool_show=True, name_descriptor="HOG", bool_return=True, name_model="kmeans")
     metric_hsv = show_metric(labels_true, kmeans_hsv.labels_, descriptors_hsv, bool_show=True, name_descriptor="HSV", bool_return=True, name_model="kmeans")
