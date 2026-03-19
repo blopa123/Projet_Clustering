@@ -77,7 +77,7 @@ def plot_metric(df_metric):
 
 
 @st.cache_data
-def load_snack_images_with_paths(data_path, img_size=(64, 64)):
+def load_snack_images_with_paths(data_path, img_size=(128, 128)):
     images_gray = []
     images_bgr = []
     labels = []
