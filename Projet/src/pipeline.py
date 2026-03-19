@@ -219,6 +219,26 @@ def pipeline(path_data=None, path_output=None):
     descriptors_lbp_ms = scaler_ms_lbp.fit_transform(np.array(descriptors_lbp))
     descriptors_resnet_ms = scaler_ms_resnet.fit_transform(np.array(descriptors_resnet))
 
+    def _safe_n_components(X, target=10):
+        """Return a safe n_components for PCA based on data shape and a desired target.
+
+        Ensures 1 <= n_components <= min(n_features, max(1, n_samples - 1)).
+        """
+        arr = np.array(X)
+        if arr.size == 0:
+            return 1
+        if arr.ndim == 1:
+            n_samples = arr.shape[0]
+            n_features = 1
+        else:
+            n_samples, n_features = arr.shape
+        max_allowed = min(n_features, max(1, n_samples - 1))
+        try:
+            tgt = int(target)
+        except Exception:
+            tgt = 1
+        return max(1, min(tgt, max_allowed))
+
     n_comp_hog = _safe_n_components(descriptors_hog_ms, target=10)
     n_comp_hist = _safe_n_components(descriptors_hist_ms, target=10)
     n_comp_hsv = _safe_n_components(descriptors_hsv_ms, target=10)
