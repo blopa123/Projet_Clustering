@@ -31,7 +31,9 @@ COPY pipeline.py ./pipeline.py
 COPY dashboard.py ./dashboard.py
 
 # Copier les résultats de sortie (fichiers Excel/CSV) pour que le dashboard puisse les lire (optionnel)
-COPY output/ ./output/
+# Crée le dossier `/app/output` si absent pour éviter l'échec du build lorsque
+# le pipeline n'a pas encore été exécuté sur l'hôte.
+RUN mkdir -p /app/output
 
 # Aligner les donnees sur la convention demandee: /app/data/test
 COPY Projet/donnees/test/ ./data/test/
