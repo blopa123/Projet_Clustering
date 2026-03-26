@@ -1,5 +1,6 @@
 numpy
 opencv-python
+opencv-python-headless
 pandas
 plotly==5.9.0
 scikit-image
