@@ -134,7 +134,7 @@ def pipeline(path_data=None, path_output=None):
     print("- calcul features LBP...")
     descriptors_lbp = compute_lbp_descriptors(images_gray)
     print("- calcul features ResNet50...")
-    descriptors_resnet = compute_resnet50_descriptors(images_bgr)
+    descriptors_resnet = compute_resnet50_descriptors(images_bgr, layer_name="conv5_block3_out")
 
     # Normalisation pour KMeans : met toutes les dimensions sur une echelle comparable.
     scaler_km_hog = StandardScaler()
@@ -262,6 +262,9 @@ def pipeline(path_data=None, path_output=None):
     descriptors_hist_pca = _pca_fixed_dims_for_ms(descriptors_hist_ms, pca_target_dims)
     descriptors_hsv_pca = _pca_fixed_dims_for_ms(descriptors_hsv_ms, pca_target_dims)
     descriptors_resnet_pca = _pca_fixed_dims_for_ms(descriptors_resnet_ms, pca_target_dims)
+
+    # Preprocessing spécifique ResNet pour Spectral (L2 + PCA95).
+    descriptors_resnet_sc = PCA(n_components=0.95, svd_solver="full", random_state=0).fit_transform(descriptors_resnet_ms)
 
     n_comp_hog = descriptors_hog_pca.shape[1]
     n_comp_hist = descriptors_hist_pca.shape[1]
@@ -484,12 +487,18 @@ def pipeline(path_data=None, path_output=None):
     print("- calcul meanshift avec features ResNet50 (PCA réduit)...")
     meanshift_resnet.fit(descriptors_resnet_pca)
 
-    # Spectral clustering (sur données réduites par PCA), même approche que MeanShift.
+    # Spectral clustering par défaut pour HOG/HIST/HSV/LBP.
     spectral_hog = SKLearnSpectralClustering(n_clusters=number_cluster, affinity='nearest_neighbors', n_neighbors=10, random_state=0)
     spectral_hist = SKLearnSpectralClustering(n_clusters=number_cluster, affinity='nearest_neighbors', n_neighbors=10, random_state=0)
     spectral_hsv = SKLearnSpectralClustering(n_clusters=number_cluster, affinity='nearest_neighbors', n_neighbors=10, random_state=0)
     spectral_lbp = SKLearnSpectralClustering(n_clusters=number_cluster, affinity='nearest_neighbors', n_neighbors=10, random_state=0)
-    spectral_resnet = SKLearnSpectralClustering(n_clusters=number_cluster, affinity='nearest_neighbors', n_neighbors=10, random_state=0)
+    spectral_resnet = SKLearnSpectralClustering(
+        n_clusters=22,
+        affinity="rbf",
+        gamma=0.03,
+        assign_labels="discretize",
+        random_state=0,
+    )
 
     print("- calcul spectral clustering avec features HOG (PCA réduit)...")
     spectral_hog.fit(descriptors_hog_pca)
@@ -499,8 +508,8 @@ def pipeline(path_data=None, path_output=None):
     spectral_hsv.fit(descriptors_hsv_pca)
     print("- calcul spectral clustering avec features LBP (PCA réduit)...")
     spectral_lbp.fit(descriptors_lbp_pca)
-    print("- calcul spectral clustering avec features ResNet50 (PCA réduit)...")
-    spectral_resnet.fit(descriptors_resnet_pca)
+    print("- calcul spectral clustering avec features ResNet50 (L2 + PCA95)...")
+    spectral_resnet.fit(descriptors_resnet_sc)
 
 
     print("\n\n ##### Résultat ######")
