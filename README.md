@@ -19,16 +19,11 @@ pip install -r requirements.txt
 python pipeline.py --path_data "Projet/donnees/test" --path_output "output"
 ```
 
-Alternative (si vous avez deja un dossier `data/test` a la racine):
+Alternative si vos donnees sont dans `data/test`:
 
 ```bash
 python pipeline.py --path_data "data/test" --path_output "output"
 ```
-
-Sorties generees pour le dashboard (formats Excel + CSV):
-- `save_metric.xlsx` et `save_metric.csv`
-- `save_clustering_*_kmeans.xlsx` et `.csv`
-- `save_clustering_*_meanshift.xlsx` et `.csv`
 
 ## 3. Run Pipeline Dashboard
 
@@ -36,8 +31,7 @@ Sorties generees pour le dashboard (formats Excel + CSV):
 python dashboard.py --path_data "output" --port 8000
 ```
 
-Le serveur ecoute sur `0.0.0.0` (toutes les interfaces) pour etre compatible local + Docker.
-Pour ouvrir l'application en local, utilisez: `http://localhost:8000`.
+Acces application: `http://localhost:8000`
 
 ## 4. Lancer avec Docker
 
@@ -47,30 +41,34 @@ Prerequis:
 Construire l'image:
 
 ```bash
-docker build -t snack-dashboard .
+docker build --no-cache -t snack-dashboard .
 ```
 
-Demarrer le conteneur:
+Important: le dashboard lit les resultats du pipeline dans `/app/output`.
+Il faut donc que le dossier local `output/` contienne deja les CSV/XLSX (genere via le pipeline local), puis le monter dans le conteneur.
+
+Demarrer le conteneur (Linux/macOS):
 
 ```bash
-docker run -d --name snack-dashboard-container -p 8000:8000 snack-dashboard
+docker run -d --name snack-dashboard-container -p 8000:8000 -v "$(pwd)/output:/app/output" snack-dashboard
 ```
 
-Verifier qu'il tourne:
+Demarrer le conteneur (Windows PowerShell):
+
+```powershell
+docker run -d --name snack-dashboard-container -p 8000:8000 -v "${PWD}/output:/app/output" snack-dashboard
+```
+
+Verifier:
 
 ```bash
 docker ps
-```
-
-Afficher les logs (optionnel):
-
-```bash
 docker logs snack-dashboard-container
 ```
 
-Le dashboard est accessible sur `http://localhost:8000`.
+Acces application: `http://localhost:8000`
 
-Arreter et supprimer le conteneur apres la demo:
+Arret et nettoyage:
 
 ```bash
 docker stop snack-dashboard-container
