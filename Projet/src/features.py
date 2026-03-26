@@ -39,27 +39,39 @@ def compute_hog_descriptors(images):
 
 def compute_resnet50_descriptors(images, batch_size=32, layer_name="conv5_block3_out"):
     """
-    layer_name options :
-      - "avg_pool"      : sortie standard 2048 dims (pooling avg)
-      - "conv5_block3_out" : features conv avant pooling (7×7×2048)
-      - "conv4_block6_out" : features plus génériques (14×14×1024)
+    Extrait des caractéristiques sémantiques profondes via un modèle ResNet50 pré-entraîné.
+    
+    Args:
+        images (list/array): Liste d'images (niveaux de gris ou BGR).
+        batch_size (int): Taille du lot pour l'inférence (optimise la mémoire GPU/CPU).
+        layer_name (str): Nom de la couche de sortie. 
+            - "avg_pool" : Sortie 1D (2048 dims).
+            - "convX_blockY_out" : Sortie spatiale (nécessite un pooling supplémentaire).
+
+    Returns:
+        np.array: Descripteurs normalisés de taille (N, D).
     """
+    # Désactivation des logs TensorFlow pour plus de clarté
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+    
     from tensorflow.keras.applications import ResNet50
     from tensorflow.keras.applications.resnet50 import preprocess_input
     from tensorflow.keras.layers import Concatenate, GlobalAveragePooling2D, GlobalMaxPooling2D
     from tensorflow.keras.models import Model
 
+    # Chargement du modèle sans la tête de classification (ImageNet weights)
     base_model = ResNet50(weights="imagenet", include_top=False, pooling=None)
 
-    # Avec include_top=False et pooling=None, avg_pool n'existe pas comme couche nommée.
+    # 1. Gestion de la couche de sortie
     if layer_name == "avg_pool":
         output_layer = GlobalAveragePooling2D()(base_model.output)
         model = Model(inputs=base_model.input, outputs=output_layer)
     else:
         output_layer = base_model.get_layer(layer_name).output
 
-        # Si la sortie est 3D (H×W×C), appliquer un pooling global enrichi.
+        # Stratégie "Best of Both Worlds" : 
+        # Si la sortie est spatiale (4D), on concatène l'AvgPooling (contexte) 
+        # et le MaxPooling (détails saillants) pour un descripteur plus riche.
         if len(output_layer.shape) == 4:
             out_avg = GlobalAveragePooling2D()(output_layer)
             out_max = GlobalMaxPooling2D()(output_layer)
@@ -68,69 +80,97 @@ def compute_resnet50_descriptors(images, batch_size=32, layer_name="conv5_block3
         else:
             model = Model(inputs=base_model.input, outputs=output_layer)
 
-    # Prétraitement et inférence (identique à votre code actuel)
+    # 2. Prétraitement du lot d'images
     processed = []
     for image in images:
+        # Conversion forcée en RGB (ResNet a été entraîné sur 3 canaux)
         if image.ndim == 2:
             image = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_GRAY2RGB)
         else:
             image = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2RGB)
+        
+        # Redimensionnement standard ResNet (224x224)
         image = cv2.resize(image, (224, 224)).astype(np.float32)
         processed.append(image)
 
+    # Normalisation spécifique à ResNet (centrage et mise à l'échelle)
     processed = preprocess_input(np.array(processed, dtype=np.float32))
-    return model.predict(processed, batch_size=batch_size, verbose=0)
     
+    # Inférence par lots pour la stabilité mémoire
+    return model.predict(processed, batch_size=batch_size, verbose=0)
+
 
 def compute_color_histograms_hsv(images_bgr):
     """
-    Calcule des histogrammes HSV pour des images BGR.
-    H : 48 bins  (couleur pure — le plus discriminant)
-    S : 32 bins  (saturation)
-    V : 16 bins  (luminosité — le moins discriminant)
+    Calcule des histogrammes multi-canaux dans l'espace HSV.
+    Pondération : Teinte (48) > Saturation (32) > Valeur (16).
+    
+    Args:
+        images_bgr (list/array): Images au format BGR original.
+        
+    Returns:
+        np.array: Vecteur de caractéristiques concaténé et normalisé.
     """
-    eps = 1e-7
+    eps = 1e-7  # Évite la division par zéro
     descriptors = []
+    
     for image in images_bgr:
         image_uint8 = image.astype(np.uint8)
         hsv = cv2.cvtColor(image_uint8, cv2.COLOR_BGR2HSV)
 
-        # Histogrammes par canal avec bins adaptés à l'importance
+        # Calcul des histogrammes individuels. 
+        # On utilise plus de 'bins' pour H car c'est l'info la plus stable pour identifier un produit.
         h_hist = cv2.calcHist([hsv], [0], None, [48], [0, 180]).flatten()
         s_hist = cv2.calcHist([hsv], [1], None, [32], [0, 256]).flatten()
         v_hist = cv2.calcHist([hsv], [2], None, [16], [0, 256]).flatten()
-        # Normalisation par bloc pour éviter qu'un histogramme domine les autres.
+        
+        # Normalisation par canal : rend le descripteur invariant à la taille de l'image
         h_hist = h_hist / (h_hist.sum() + eps)
         s_hist = s_hist / (s_hist.sum() + eps)
         v_hist = v_hist / (v_hist.sum() + eps)
 
+        # Fusion des informations
         descriptor = np.concatenate([h_hist, s_hist, v_hist])
 
-        # Normalisation finale pour stabiliser l'échelle entre images.
+        # Normalisation L2 finale pour assurer une distance euclidienne cohérente en clustering
         descriptor = descriptor / (np.linalg.norm(descriptor) + eps)
 
         descriptors.append(descriptor)
+        
     return np.array(descriptors)
 
 
 def compute_lbp_descriptors(images, radius=2, n_points=16, method="uniform"):
     """
-    Calcule un descripteur LBP global par image via histogramme normalise.
-    Input : images (array) : images en niveaux de gris
-            radius (int) : rayon du voisinage LBP
-            n_points (int) : nombre de points echantillonnes
-            method (str) : methode LBP (uniform recommande)
-    Output : descriptors (array) : histogrammes LBP normalises
+    Calcule la signature de texture via Local Binary Patterns (LBP).
+    Utilise la méthode 'uniform' pour un descripteur compact et robuste au bruit.
+    
+    Args:
+        images (list/array): Images en niveaux de gris.
+        radius (int): Rayon du cercle de voisinage.
+        n_points (int): Nombre de points échantillonnés sur le cercle.
+        method (str): "uniform" garantit l'invariance par rotation simple.
+        
+    Returns:
+        np.array: Histogrammes de texture normalisés.
     """
     descriptors = []
+    # En méthode uniform, n_bins = n_points + 2 (les motifs uniformes + 1 pour les non-uniformes)
     n_bins = n_points + 2 if method == "uniform" else int(2 ** n_points)
 
     for image in images:
         image_uint8 = image.astype(np.uint8)
+        
+        # Calcul de la carte LBP
         lbp = local_binary_pattern(image_uint8, P=n_points, R=radius, method=method)
+        
+        # Construction de l'histogramme de fréquences des motifs de texture
         hist, _ = np.histogram(lbp.ravel(), bins=n_bins, range=(0, n_bins))
+        
+        # Normalisation pour obtenir une distribution de probabilité (Somme = 1)
         hist = hist.astype(np.float32)
         hist /= (hist.sum() + 1e-7)
+        
         descriptors.append(hist)
 
     return np.array(descriptors)
